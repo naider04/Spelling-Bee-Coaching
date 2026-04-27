@@ -90,11 +90,23 @@ export default function App() {
 
   // Voice synthesis
   const speak = useCallback((text: string) => {
-    if (isMuted) return;
+    if (typeof window === 'undefined' || !window.speechSynthesis || isMuted) return;
+    
+    // Cancel any current speech to prevent overlapping or queuing
+    window.speechSynthesis.cancel();
+    
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.9;
+    utterance.lang = "en-US";
+    utterance.rate = 0.85; // Slightly slower for better clarity in spelling contests
+    utterance.pitch = 1.0;
+    
     window.speechSynthesis.speak(utterance);
   }, [isMuted]);
+
+  // Auto-pronounce word when it changes
+  useEffect(() => {
+    speak(WORDS[currentWordIndex]);
+  }, [currentWordIndex, speak]);
 
   useEffect(() => {
     isListeningRef.current = isListening;
