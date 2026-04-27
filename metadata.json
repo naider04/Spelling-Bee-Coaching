@@ -1,0 +1,6 @@
+{
+  "name": "SpellBound",
+  "description": "A voice-controlled spelling game that guides you through challenging words with real-time feedback.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": []
+}
