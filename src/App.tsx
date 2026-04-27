@@ -81,6 +81,7 @@ export default function App() {
   const [interimText, setInterimText] = useState("");
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const [isListening, setIsListening] = useState(false);
+  const isListeningRef = useRef(false);
   const [status, setStatus] = useState<"idle" | "correct" | "error" | "validating">("idle");
   const [isMuted, setIsMuted] = useState(false);
   
@@ -94,6 +95,10 @@ export default function App() {
     utterance.rate = 0.9;
     window.speechSynthesis.speak(utterance);
   }, [isMuted]);
+
+  useEffect(() => {
+    isListeningRef.current = isListening;
+  }, [isListening]);
 
   // Phonetic cleaning with anti-pronunciation check
   const cleanSpelling = useCallback((text: string) => {
@@ -196,7 +201,7 @@ export default function App() {
     };
 
     recognition.onend = () => {
-      if (isListening) {
+      if (isListeningRef.current) {
         try {
           recognitionRef.current?.start();
         } catch (e) {
@@ -212,15 +217,26 @@ export default function App() {
   const toggleMic = () => {
     if (isListening) {
       setIsListening(false);
-      recognitionRef.current?.stop();
+      try {
+        recognitionRef.current?.stop();
+      } catch (e) {
+        console.warn("Stop failed:", e);
+      }
     } else {
       setIsListening(true);
-      if (!recognitionRef.current) initRecognition();
-      try {
-        recognitionRef.current?.start();
-      } catch (e) {
-        console.error("Manual start failed:", e);
+      if (!recognitionRef.current) {
+        initRecognition();
       }
+      
+      // Delay slightly to allow any previous instance to fully clear if needed
+      setTimeout(() => {
+        try {
+          recognitionRef.current?.start();
+        } catch (e) {
+          console.error("Manual start failed:", e);
+          setDebugLog(prev => ["Restarting mic...", ...prev].slice(0, 5));
+        }
+      }, 100);
     }
   };
 
@@ -283,8 +299,8 @@ export default function App() {
       {/* Navigation Bar - Spelling Bee UNEMI 2026 */}
       <nav className="h-16 px-6 md:px-10 flex items-center justify-between border-b border-slate-200 bg-white shadow-sm shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-amber-400 rounded-lg flex items-center justify-center">
-            <Zap className="w-5 h-5 text-amber-900" />
+          <div className="w-8 h-8 bg-amber-400 rounded-lg flex items-center justify-center text-lg">
+            🐝
           </div>
           <span className="font-bold tracking-tight text-xl text-amber-900">Spelling Bee UNEMI 2026</span>
         </div>
@@ -344,7 +360,7 @@ export default function App() {
                   className={`
                     text-[1rem] md:text-5xl font-mono font-bold leading-none
                     ${isPending ? 'text-slate-200' : ''}
-                    ${isCorrect ? 'text-amber-500' : ''}
+                    ${isCorrect ? 'text-emerald-500' : ''}
                     ${isWrong ? 'text-red-500' : ''}
                   `}
                 >
@@ -360,7 +376,7 @@ export default function App() {
               <motion.div 
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="text-amber-600 font-bold uppercase tracking-[0.3em] text-xs"
+                className="text-emerald-600 font-bold uppercase tracking-[0.3em] text-xs"
               >
                 Correct!
               </motion.div>
@@ -419,7 +435,7 @@ export default function App() {
           )}
 
           <div className="flex gap-2 p-1 bg-slate-200/50 rounded-lg text-[10px] font-bold text-slate-500 uppercase tracking-tight">
-            <span className="px-2 py-1 bg-white rounded shadow-sm text-amber-600">UNEMI 2026 Engine</span>
+            <span className="px-2 py-1 bg-white rounded shadow-sm text-blue-600">UNEMI 2026 Engine</span>
             <span className="px-2 py-1">Phoneme Mapping V2.1</span>
           </div>
         </div>
