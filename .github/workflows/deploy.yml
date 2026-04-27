@@ -18,6 +18,7 @@ jobs:
 
       - run: rm -rf package-lock.json node_modules
       - run: npm install
+      - run: npm rebuild  # Add this line to rebuild native modules
       - run: npm run build
 
       - uses: actions/upload-pages-artifact@v3
