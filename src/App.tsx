@@ -185,6 +185,12 @@ export default function App() {
     };
 
     recognition.onerror = (event: any) => {
+      // Handle the 'no-speech' error which is common when the user is quiet
+      if (event.error === "no-speech") {
+        setDebugLog(prev => ["(Mic active, waiting for speech...)", ...prev].slice(0, 5));
+        return;
+      }
+
       console.error("Speech recognition error", event.error);
       setDebugLog(prev => [`Error: ${event.error}`, ...prev].slice(0, 5));
       
@@ -201,18 +207,28 @@ export default function App() {
     };
 
     recognition.onend = () => {
+      // Only restart if the user still wants the mic on
       if (isListeningRef.current) {
         try {
           recognitionRef.current?.start();
         } catch (e) {
-          console.warn("Restart attempt failed, resetting state.");
-          setIsListening(false);
+          // If start fails (e.g. already starting), wait a bit and try once more if still listening
+          setTimeout(() => {
+            if (isListeningRef.current) {
+              try {
+                recognitionRef.current?.start();
+              } catch (secondErr) {
+                console.warn("Auto-restart failed twice:", secondErr);
+                setIsListening(false);
+              }
+            }
+          }, 300);
         }
       }
     };
 
     recognitionRef.current = recognition;
-  }, [isListening, cleanSpelling]);
+  }, [cleanSpelling]); // Removed isListening from dependencies to avoid unnecessary re-initializations
 
   const toggleMic = () => {
     if (isListening) {
