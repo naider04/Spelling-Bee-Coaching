@@ -5,7 +5,7 @@
 
 import { motion, AnimatePresence } from "motion/react";
 import { Mic, MicOff, RotateCcw, Volume2, CheckCircle2, XCircle, ChevronRight, Zap } from "lucide-react";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 // Register speech recognition for TypeScript
 declare global {
@@ -15,37 +15,41 @@ declare global {
   }
 }
 
-const WORDS = [
-  "Accurate", "Acknowledgement", "Acknowledgment", "Acquaintance", "Activity",
-  "Adventure", "Always", "Ambiguous", "Answer", "Anxious", "Apprehensive",
-  "Architecture", "Articulate", "Assertive", "Assimilate", "Astonishing",
-  "Autonomous", "Balance", "Benevolent", "Between", "Biochemistry", "Book",
-  "Bored", "Bottle", "Boy", "Break", "Brevity", "Calendar", "Camouflage",
-  "Capricious", "Career", "Challenge", "Children", "Close", "Coherence",
-  "Colloquial", "Complete", "Compliance", "Computer", "Conscientious",
-  "Control", "Controversial", "Convoluted", "Country", "Curious", "Decide",
-  "Dehydration", "Dilemma", "Disappearance", "Discover", "Discrepancy",
-  "Divulge", "Eloquent", "Embarrassing", "Empirical", "Encounter", "Energy",
-  "Enigmatic", "Environmentally", "Ephemeral", "Exaggeration", "Face",
-  "Fairness", "Famous", "Father", "Feel", "Filmmaker", "Finger",
-  "Flabbergasted", "Flower", "Focus", "Foster", "Friend", "Gate", "Gather",
-  "Handkerchief", "Help", "Honest", "Hypothetical", "Imagine", "Impeccable",
-  "Importune", "Improve", "Independence", "Indispensable", "Ineffable",
-  "Irreplaceable", "Journey", "Judgemental", "Knowledge", "Knowledgeable",
-  "Language", "Look", "Make", "Member", "Message", "Meticulous",
-  "Misunderstood", "Monday", "Movie", "Nature", "Near", "Neighborhood",
-  "Night", "Notebook", "Notice", "Observe", "Obsolete", "Often", "Outside",
-  "Overwhelming", "Package", "Paradox", "Patient", "Pencil", "People",
-  "Perfect", "Perseverance", "Plausible", "Play", "Please", "Popular",
-  "Potato", "Practice", "Pragmatic", "Predicament", "Prepare", "Present",
-  "Protect", "Provide", "Psychologist", "Quarantine", "Quickly", "Reason",
-  "Recommendable", "Redundant", "Reiterate", "Resilient", "Respect",
-  "Result", "Rich", "School", "Secret", "Serious", "Shoes", "Small",
-  "Sophisticated", "Speak", "Special", "Spontaneous", "Spoon", "Sport",
-  "Strong", "Student", "Subtle", "Suggest", "Talent", "Taxonomy",
-  "Teacher", "Think", "Travel", "Tree", "Unbelievable", "Unnecessary",
-  "Useful", "Vacation", "Wash", "Water", "Welcome", "Wisdom", "Yesterday"
-];
+const WORDS_BY_LEVEL: Record<string, string[]> = {
+  Beginner: [
+    "Activity", "Always", "Answer", "Between", "Book", "Bored", "Bottle", "Boy", "Break", 
+    "Children", "Close", "Computer", "Country", "Face", "Father", "Feel", "Finger", "Flower", 
+    "Friend", "Gate", "Help", "Look", "Make", "Monday", "Movie", "Nature", "Near", "Night", 
+    "Notebook", "Often", "Pencil", "People", "Play", "Please", "Potato", "Rich", "School", 
+    "Shoes", "Small", "Speak", "Spoon", "Sport", "Strong", "Teacher", "Think", "Tree", "Wash", "Water"
+  ],
+  Intermediate: [
+    "Accurate", "Adventure", "Balance", "Calendar", "Career", "Challenge", "Complete", "Control", 
+    "Curious", "Decide", "Discover", "Energy", "Famous", "Focus", "Gather", "Honest", "Imagine", 
+    "Improve", "Journey", "Knowledge", "Language", "Member", "Message", "Notice", "Observe", 
+    "Outside", "Package", "Patient", "Perfect", "Popular", "Practice", "Prepare", "Present", 
+    "Protect", "Provide", "Quickly", "Reason", "Respect", "Result", "Secret", "Serious", 
+    "Special", "Student", "Suggest", "Talent", "Travel", "Useful", "Vacation", "Welcome", "Yesterday"
+  ],
+  Senior: [
+    "Ambiguous", "Anxious", "Apprehensive", "Articulate", "Assertive", "Assimilate", "Astonishing", 
+    "Autonomous", "Benevolent", "Brevity", "Camouflage", "Capricious", "Coherence", "Colloquial", 
+    "Conscientious", "Controversial", "Convoluted", "Dilemma", "Discrepancy", "Divulge", "Eloquent", 
+    "Empirical", "Encounter", "Enigmatic", "Ephemeral", "Fairness", "Filmmaker", "Foster", 
+    "Hypothetical", "Impeccable", "Importune", "Indispensable", "Ineffable", "Judgemental", 
+    "Meticulous", "Neighborhood", "Obsolete", "Paradox", "Perseverance", "Plausible", "Pragmatic", 
+    "Predicament", "Redundant", "Reiterate", "Resilient", "Sophisticated", "Spontaneous", "Subtle", 
+    "Taxonomy", "Unnecessary", "Wisdom"
+  ],
+  Master: [
+    "Acknowledgment", "Acquaintance", "Architecture", "Biochemistry", "Camouflage", "Compliance", 
+    "Conscientious", "Controversial", "Dehydration", "Disappearance", "Embarrassing", "Environmentally", 
+    "Exaggeration", "Flabbergasted", "Handkerchief", "Hypothetical", "Independence", "Irreplaceable", 
+    "Knowledgeable", "Misunderstood", "Overwhelming", "Psychologist", "Quarantine", "Recommendable", "Unbelievable"
+  ]
+};
+
+const LEVELS: ("Beginner" | "Intermediate" | "Senior" | "Master")[] = ["Beginner", "Intermediate", "Senior", "Master"];
 
 const PHONETIC_MAP: Record<string, string> = {
   "i am": "im",
@@ -76,9 +80,25 @@ const PHONETIC_MAP: Record<string, string> = {
 };
 
 export default function App() {
+  const [selectedLevels, setSelectedLevels] = useState<string[]>(["Beginner", "Intermediate", "Senior", "Master"]);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  
+  const currentWords = useMemo(() => {
+    const filtered = selectedLevels.flatMap(level => WORDS_BY_LEVEL[level] || []);
+    return filtered.length > 0 ? filtered : ["No Words Selected"];
+  }, [selectedLevels]);
+  
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
   const [spelledText, setSpelledText] = useState("");
   const [interimText, setInterimText] = useState("");
+
+  // Reset progress when words change
+  useEffect(() => {
+    setCurrentWordIndex(0);
+    setSpelledText("");
+    setInterimText("");
+    setStatus("idle");
+  }, [currentWords]);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const [isListening, setIsListening] = useState(false);
   const isListeningRef = useRef(false);
@@ -86,11 +106,13 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   
   const recognitionRef = useRef<any>(null);
-  const targetWord = WORDS[currentWordIndex].toLowerCase();
+
+  const currentWord = currentWords[currentWordIndex] || currentWords[0] || "Default";
+  const targetWord = currentWord.toLowerCase();
 
   // Voice synthesis
   const speak = useCallback((text: string) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis || isMuted) return;
+    if (typeof window === 'undefined' || !window.speechSynthesis || isMuted || text === "No Words Selected") return;
     
     // Cancel any current speech to prevent overlapping or queuing
     window.speechSynthesis.cancel();
@@ -105,8 +127,10 @@ export default function App() {
 
   // Auto-pronounce word when it changes
   useEffect(() => {
-    speak(WORDS[currentWordIndex]);
-  }, [currentWordIndex, speak]);
+    if (currentWords.length > 0 && currentWords[0] !== "No Words Selected") {
+      speak(currentWord);
+    }
+  }, [currentWord, speak]);
 
   useEffect(() => {
     isListeningRef.current = isListening;
@@ -268,20 +292,22 @@ export default function App() {
     }
   };
 
-  const resetWordProgress = () => {
+  const resetWordProgress = useCallback(() => {
     setSpelledText("");
     setInterimText("");
     setStatus("idle");
     setDebugLog([]);
-  };
+  }, []);
 
-  const nextWord = () => {
-    setCurrentWordIndex((prev) => (prev + 1) % WORDS.length);
+  const nextWord = useCallback(() => {
+    setCurrentWordIndex((prev) => (prev + 1) % currentWords.length);
     resetWordProgress();
-  };
+  }, [currentWords.length, resetWordProgress]);
 
   // Check correctness
   useEffect(() => {
+    if (currentWords[0] === "No Words Selected") return;
+
     const currentFullSpelling = (spelledText + interimText).replace(/\s/g, "");
     
     // Check if the total spelled sequence effectively matches correctly (fuzzy allowed)
@@ -315,27 +341,84 @@ export default function App() {
     } else {
       setStatus("idle");
     }
-  }, [spelledText, interimText, targetWord, isCharCorrect]);
+  }, [spelledText, interimText, targetWord, isCharCorrect, currentWords, nextWord]);
 
   useEffect(() => {
     initRecognition();
     return () => recognitionRef.current?.stop();
   }, [initRecognition]);
 
+  const toggleLevel = (level: string) => {
+    setSelectedLevels(prev => {
+      if (prev.includes(level)) {
+        if (prev.length === 1) return prev; // Keep at least one
+        return prev.filter(l => l !== level);
+      }
+      return [...prev, level];
+    });
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col selection:bg-blue-600 selection:text-white">
       {/* Navigation Bar - Spelling Bee UNEMI 2026 */}
-      <nav className="h-16 px-6 md:px-10 flex items-center justify-between border-b border-slate-200 bg-white shadow-sm shrink-0">
+      <nav className="h-16 px-6 md:px-10 flex items-center justify-between border-b border-slate-200 bg-white shadow-sm shrink-0 sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-amber-400 rounded-lg flex items-center justify-center text-lg">
             🐝
           </div>
-          <span className="font-bold tracking-tight text-xl text-amber-900">Spelling Bee UNEMI 2026</span>
+          <span className="font-bold tracking-tight text-xl text-amber-900 hidden sm:inline">Spelling Bee UNEMI 2026</span>
         </div>
-        <div className="flex items-center gap-6 text-sm font-medium text-slate-500">
-          <span className="text-amber-600 border-b-2 border-amber-600 pb-1">Competition</span>
-          <div className="text-[10px] font-mono tabular-nums bg-amber-50 text-amber-700 px-2 py-1 rounded border border-amber-100">
-            LEVEL {Math.floor(currentWordIndex / 10) + 1} // {currentWordIndex + 1}/{WORDS.length}
+        
+        <div className="flex items-center gap-4">
+          {/* Level Selector Menu */}
+          <div className="relative">
+            <button 
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+              className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold text-slate-700 transition-colors"
+            >
+              LEVELS ({selectedLevels.length})
+              <ChevronRight className={`w-3 h-3 transition-transform ${isMenuOpen ? 'rotate-90' : ''}`} />
+            </button>
+
+            <AnimatePresence>
+              {isMenuOpen && (
+                <>
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    onClick={() => setIsMenuOpen(false)}
+                    className="fixed inset-0 bg-transparent z-40"
+                  />
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                    className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2 space-y-1"
+                  >
+                    {LEVELS.map(level => (
+                      <button
+                        key={level}
+                        onClick={() => toggleLevel(level)}
+                        className={`
+                          w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold transition-all
+                          ${selectedLevels.includes(level) 
+                            ? 'bg-amber-50 text-amber-700' 
+                            : 'text-slate-400 hover:bg-slate-50'}
+                        `}
+                      >
+                        {level}
+                        {selectedLevels.includes(level) && <CheckCircle2 className="w-3 h-3" />}
+                      </button>
+                    ))}
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+          </div>
+
+          <div className="text-[10px] font-mono tabular-nums bg-amber-50 text-amber-700 px-2 py-1 rounded border border-amber-100 hidden md:block">
+            WORD {currentWordIndex + 1}/{currentWords.length}
           </div>
         </div>
       </nav>
@@ -346,15 +429,15 @@ export default function App() {
         <div className="text-center space-y-1">
           <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Current Word</span>
           <motion.h1 
-            key={WORDS[currentWordIndex]}
+            key={currentWord}
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             className="text-[1.8rem] md:text-[2.5rem] font-black tracking-tight text-slate-900 uppercase"
           >
-            {WORDS[currentWordIndex]}
+            {currentWord}
           </motion.h1>
           <button 
-            onClick={() => speak(WORDS[currentWordIndex])}
+            onClick={() => speak(currentWord)}
             className="flex items-center gap-2 mx-auto px-4 py-1.5 rounded-full text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-all text-[9px] font-bold uppercase tracking-widest"
           >
             <Volume2 className="w-3 h-3" />
@@ -472,7 +555,7 @@ export default function App() {
       {/* Word List Footer */}
       <footer className="h-24 bg-white border-t border-slate-200 px-6 flex items-center gap-4 overflow-hidden shrink-0">
         <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide no-scrollbar">
-          {WORDS.map((word, idx) => (
+          {currentWords.map((word, idx) => (
             <div 
               key={idx}
               className={`
