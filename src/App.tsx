@@ -4,7 +4,7 @@
  */
 
 import { motion, AnimatePresence } from "motion/react";
-import { Mic, MicOff, RotateCcw, Volume2, CheckCircle2, XCircle, ChevronRight, Zap } from "lucide-react";
+import { Mic, MicOff, RotateCcw, Volume2, CheckCircle2, XCircle, ChevronRight, Zap, Eye, EyeOff } from "lucide-react";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 // Register speech recognition for TypeScript
@@ -85,12 +85,32 @@ export default function App() {
   
   const currentWords = useMemo(() => {
     const filtered = selectedLevels.flatMap(level => WORDS_BY_LEVEL[level] || []);
-    return filtered.length > 0 ? filtered : ["No Words Selected"];
+    const shuffled = filtered.length > 0 ? [...filtered].sort(() => Math.random() - 0.5) : ["No Words Selected"];
+    return shuffled;
   }, [selectedLevels]);
   
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
   const [spelledText, setSpelledText] = useState("");
   const [interimText, setInterimText] = useState("");
+  const [isWordHidden, setIsWordHidden] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [micSyncOffset, setMicSyncOffset] = useState(0.6); // Default 0.6s as requested
+  const isSpeakingRef = useRef(false);
+  const isTransitioningRef = useRef(false);
+  const ttsTimerRef = useRef<any>(null);
+  const transitionTimerRef = useRef<any>(null);
+
+  useEffect(() => {
+    isSpeakingRef.current = isSpeaking;
+  }, [isSpeaking]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
+      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+    };
+  }, []);
 
   // Reset progress when words change
   useEffect(() => {
@@ -119,11 +139,52 @@ export default function App() {
     
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "en-US";
-    utterance.rate = 0.85; // Slightly slower for better clarity in spelling contests
+    utterance.rate = 0.85; 
     utterance.pitch = 1.0;
     
+    utterance.onstart = () => {
+      setIsSpeaking(true);
+      
+      // Attempt to "predict" the end if offset is positive
+      if (micSyncOffset > 0) {
+        if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
+        
+        // Very rough estimate: (chars * 0.1s / rate) - offset
+        // We add a safety floor
+        const estimatedDurationMs = Math.max(200, (text.length * 110 / 0.85) - (micSyncOffset * 1000));
+        
+        ttsTimerRef.current = setTimeout(() => {
+          if (isSpeakingRef.current) {
+            handleTTSEnd();
+          }
+        }, estimatedDurationMs);
+      }
+    };
+
+    const handleTTSEnd = () => {
+      if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
+      if (!isSpeakingRef.current) return;
+
+      setIsSpeaking(false);
+      
+      // If we were transitioning, restart the mic now that the word has been announced
+      if (isTransitioningRef.current) {
+        isTransitioningRef.current = false;
+        if (isListeningRef.current) {
+          try {
+            recognitionRef.current?.start();
+          } catch (e) {
+            console.warn("Post-transition mic start failed:", e);
+          }
+        }
+      }
+    };
+
+    utterance.onend = handleTTSEnd;
+    utterance.onerror = () => setIsSpeaking(false);
+    
     window.speechSynthesis.speak(utterance);
-  }, [isMuted]);
+  }, [isMuted, micSyncOffset]);
 
   // Auto-pronounce word when it changes
   useEffect(() => {
@@ -171,10 +232,10 @@ export default function App() {
     if (inputChar === targetChar) return true;
     
     const equivalents: Record<string, string[]> = {
-      'v': ['d'],
+      'v': ['d', 'b'],
       'd': ['v', 'z'],
       'z': ['d'],
-      'b': ['p'],
+      'b': ['p', 'v'],
       'p': ['b']
     };
 
@@ -194,6 +255,8 @@ export default function App() {
     recognition.lang = "en-US";
 
     recognition.onresult = (event: any) => {
+      if (isSpeakingRef.current || isTransitioningRef.current) return;
+
       let currentFinal = "";
       let currentInterim = "";
 
@@ -207,7 +270,7 @@ export default function App() {
 
       // Update Debug Log
       if (currentFinal || currentInterim) {
-        setDebugLog(prev => [currentFinal || currentInterim, ...prev].slice(0, 5));
+        setDebugLog(prev => [currentFinal || currentInterim, ...prev].slice(0, 10));
       }
 
       if (currentFinal) {
@@ -223,12 +286,12 @@ export default function App() {
     recognition.onerror = (event: any) => {
       // Handle the 'no-speech' error which is common when the user is quiet
       if (event.error === "no-speech") {
-        setDebugLog(prev => ["(Mic active, waiting for speech...)", ...prev].slice(0, 5));
+        setDebugLog(prev => ["(Mic active, waiting for speech...)", ...prev].slice(0, 10));
         return;
       }
 
       console.error("Speech recognition error", event.error);
-      setDebugLog(prev => [`Error: ${event.error}`, ...prev].slice(0, 5));
+      setDebugLog(prev => [`Error: ${event.error}`, ...prev].slice(0, 10));
       
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
         setIsListening(false);
@@ -243,8 +306,8 @@ export default function App() {
     };
 
     recognition.onend = () => {
-      // Only restart if the user still wants the mic on
-      if (isListeningRef.current) {
+      // Only restart if the user still wants the mic on and we aren't transitioning between words
+      if (isListeningRef.current && !isTransitioningRef.current) {
         try {
           recognitionRef.current?.start();
         } catch (e) {
@@ -286,9 +349,9 @@ export default function App() {
           recognitionRef.current?.start();
         } catch (e) {
           console.error("Manual start failed:", e);
-          setDebugLog(prev => ["Restarting mic...", ...prev].slice(0, 5));
+          setDebugLog(prev => ["Restarting mic...", ...prev].slice(0, 10));
         }
-      }, 100);
+      }, 50);
     }
   };
 
@@ -324,11 +387,26 @@ export default function App() {
         }
     }
 
-    if (allCorrect && currentFullSpelling.length === targetWord.length) {
+    if (allCorrect && currentFullSpelling.length === targetWord.length && status !== "correct") {
       setStatus("correct");
-      const timer = setTimeout(nextWord, 1000);
-      return () => clearTimeout(timer);
-    } else if (currentFullSpelling.length > 0) {
+      
+      // Stop recognition immediately to clear buffers and prevent bleed
+      if (isListeningRef.current) {
+        isTransitioningRef.current = true;
+        try {
+          recognitionRef.current?.stop();
+        } catch (e) {
+          console.warn("Stop on correct failed:", e);
+        }
+      }
+      
+      // Use ref to keep timer stable across effect re-runs
+      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = setTimeout(() => {
+        nextWord();
+        transitionTimerRef.current = null;
+      }, 1000);
+    } else if (currentFullSpelling.length > 0 && status !== "correct") {
       // Incremental error checking
       let hasError = false;
       for (let i = 0; i < currentFullSpelling.length; i++) {
@@ -358,15 +436,37 @@ export default function App() {
     });
   };
 
+  const currentLevelColor = useMemo(() => {
+    // Find which level this word belongs to
+    const level = Object.entries(WORDS_BY_LEVEL).find(([_, words]) => 
+      words.includes(currentWord)
+    )?.[0] || "Beginner";
+
+    switch(level) {
+      case "Beginner": return "emerald";
+      case "Intermediate": return "blue";
+      case "Senior": return "indigo";
+      case "Master": return "violet";
+      default: return "emerald";
+    }
+  }, [currentWord]);
+
+  const isBlocked = isListening && (isSpeaking || status === "correct" || isTransitioningRef.current);
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col selection:bg-blue-600 selection:text-white">
       {/* Navigation Bar - Spelling Bee UNEMI 2026 */}
-      <nav className="h-16 px-6 md:px-10 flex items-center justify-between border-b border-slate-200 bg-white shadow-sm shrink-0 sticky top-0 z-50">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-amber-400 rounded-lg flex items-center justify-center text-lg">
+      <nav className="h-16 px-4 md:px-10 flex items-center justify-between border-b border-slate-200 bg-white shadow-sm shrink-0 sticky top-0 z-50">
+        <div className="flex items-center gap-2 md:gap-3">
+          <div className="w-8 h-8 md:w-9 md:h-9 bg-amber-400 rounded-xl flex items-center justify-center text-lg md:text-xl shadow-inner border border-amber-300">
             🐝
           </div>
-          <span className="font-bold tracking-tight text-xl text-amber-900 hidden sm:inline">Spelling Bee UNEMI 2026</span>
+          <div className="flex flex-col">
+            <span className="font-black tracking-tighter text-sm md:text-xl text-slate-900 leading-none">
+              SPELLING BEE <span className="text-blue-600">UNEMI</span>
+            </span>
+            <span className="text-[8px] md:text-[10px] font-bold text-slate-400 tracking-[0.2em] md:tracking-[0.3em] uppercase">2026 EDITION</span>
+          </div>
         </div>
         
         <div className="flex items-center gap-4">
@@ -403,12 +503,22 @@ export default function App() {
                         className={`
                           w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold transition-all
                           ${selectedLevels.includes(level) 
-                            ? 'bg-amber-50 text-amber-700' 
+                            ? (level === "Beginner" ? 'bg-emerald-50 text-emerald-700' : 
+                               level === "Intermediate" ? 'bg-blue-50 text-blue-700' :
+                               level === "Senior" ? 'bg-indigo-50 text-indigo-700' :
+                               'bg-violet-50 text-violet-700')
                             : 'text-slate-400 hover:bg-slate-50'}
                         `}
                       >
                         {level}
-                        {selectedLevels.includes(level) && <CheckCircle2 className="w-3 h-3" />}
+                        {selectedLevels.includes(level) && (
+                          <CheckCircle2 className={`w-3 h-3 ${
+                            level === "Beginner" ? 'text-emerald-500' : 
+                            level === "Intermediate" ? 'text-blue-500' :
+                            level === "Senior" ? 'text-indigo-500' :
+                            'text-violet-500'
+                          }`} />
+                        )}
                       </button>
                     ))}
                   </motion.div>
@@ -417,7 +527,12 @@ export default function App() {
             </AnimatePresence>
           </div>
 
-          <div className="text-[10px] font-mono tabular-nums bg-amber-50 text-amber-700 px-2 py-1 rounded border border-amber-100 hidden md:block">
+          <div className={`text-[10px] font-mono tabular-nums px-2 py-1 rounded border hidden md:block ${
+            currentLevelColor === 'emerald' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+            currentLevelColor === 'blue' ? 'bg-blue-50 text-blue-700 border-blue-100' :
+            currentLevelColor === 'indigo' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' :
+            'bg-violet-50 text-violet-700 border-violet-100'
+          }`}>
             WORD {currentWordIndex + 1}/{currentWords.length}
           </div>
         </div>
@@ -428,21 +543,31 @@ export default function App() {
         {/* Word Challenge Header - Sized Reduced to 28%/30% */}
         <div className="text-center space-y-1">
           <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Current Word</span>
-          <motion.h1 
+          <motion.h1
             key={currentWord}
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="text-[1.8rem] md:text-[2.5rem] font-black tracking-tight text-slate-900 uppercase"
+            className={`text-[1.8rem] md:text-[2.5rem] font-black tracking-tight text-slate-900 uppercase transition-all duration-300 relative ${isWordHidden ? 'blur-xl select-none' : ''}`}
           >
-            {currentWord}
+            {isWordHidden ? "••••••" : currentWord}
           </motion.h1>
-          <button 
-            onClick={() => speak(currentWord)}
-            className="flex items-center gap-2 mx-auto px-4 py-1.5 rounded-full text-slate-400 hover:text-amber-600 hover:bg-amber-50 transition-all text-[9px] font-bold uppercase tracking-widest"
-          >
-            <Volume2 className="w-3 h-3" />
-            Listen
-          </button>
+          <div className="flex items-center justify-center gap-2">
+            <button 
+              onClick={() => speak(currentWord)}
+              className="flex items-center gap-2 px-5 py-2 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-all text-[11px] font-bold uppercase tracking-widest shadow-md shadow-blue-100 active:scale-95"
+            >
+              <Volume2 className="w-4 h-4" />
+              Listen
+            </button>
+            <button 
+              onClick={() => setIsWordHidden(!isWordHidden)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all text-[11px] font-bold uppercase tracking-widest active:scale-95 ${isWordHidden ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200 hover:text-slate-600 hover:bg-slate-100'}`}
+              title={isWordHidden ? "Unhide Word" : "Hide Word"}
+            >
+              {isWordHidden ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+              {isWordHidden ? "Unhide" : "Hide"}
+            </button>
+          </div>
         </div>
 
         {/* Spelling Card */}
@@ -497,34 +622,57 @@ export default function App() {
 
         {/* Action Controls */}
         <div className="flex flex-col items-center gap-6 w-full">
-          <div className="flex items-center gap-6">
-            <button 
-              onClick={resetWordProgress}
-              className="w-12 h-12 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-slate-900 transition-colors shadow-sm flex items-center justify-center"
-              title="Reset Spelling"
-            >
-              <RotateCcw size={20} />
-            </button>
-            
-            <button 
-              onClick={toggleMic}
-              className={`
-                w-20 h-20 rounded-full flex items-center justify-center text-white shadow-lg transition-all active:scale-95 relative
-                ${isListening ? 'bg-blue-500 shadow-blue-200 ring-4 ring-blue-100' : 'bg-red-500 shadow-red-200 hover:bg-red-600'}
-              `}
-            >
-              {isListening ? <Mic size={32} strokeWidth={2.5} /> : <MicOff size={32} strokeWidth={2.5} />}
-              
-              {isListening && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40">
-                  <motion.div 
-                    animate={{ scale: [1, 1.3, 1], opacity: [0.3, 0.6, 0.3] }}
-                    transition={{ repeat: Infinity, duration: 1 }}
-                    className="w-full h-full rounded-full border-4 border-white"
+          <div className="flex flex-col items-center gap-2">
+            {/* Charging Bar for Mic Readiness */}
+            <div className="w-48 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+              <AnimatePresence mode="wait">
+                {isBlocked && (
+                  <motion.div
+                    key="progress"
+                    initial={{ width: "0%" }}
+                    animate={{ width: "100%" }}
+                    transition={{ 
+                      duration: status === "correct" ? 1 : 2, // 1s for next word, ~2s estimated for TTS
+                      ease: "linear",
+                      repeat: Infinity
+                    }}
+                    className="h-full bg-red-500"
                   />
-                </div>
-              )}
-            </button>
+                )}
+              </AnimatePresence>
+            </div>
+            
+            <div className="flex items-center gap-6">
+              <button 
+                onClick={resetWordProgress}
+                className="w-12 h-12 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-slate-900 transition-colors shadow-sm flex items-center justify-center"
+                title="Reset Spelling"
+              >
+                <RotateCcw size={20} />
+              </button>
+              
+              <button 
+                onClick={toggleMic}
+                className={`
+                  w-20 h-20 rounded-full flex items-center justify-center text-white shadow-lg active:scale-95 relative
+                  ${(isListening && !isBlocked) ? 'scale-110 opacity-100' : 'scale-90 opacity-80'}
+                  ${isListening 
+                    ? (isBlocked ? 'bg-red-500 shadow-red-200' : 'bg-blue-500 shadow-blue-200 ring-4 ring-blue-100') 
+                    : 'bg-red-500 shadow-red-200 hover:bg-red-600'}
+                `}
+              >
+                {isListening ? (isBlocked ? <MicOff size={32} strokeWidth={2.5} /> : <Mic size={32} strokeWidth={2.5} />) : <MicOff size={32} strokeWidth={2.5} />}
+                
+                {isListening && !isBlocked && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-40">
+                    <motion.div 
+                      animate={{ scale: [1, 1.3, 1], opacity: [0.3, 0.6, 0.3] }}
+                      transition={{ repeat: Infinity, duration: 1 }}
+                      className="w-full h-full rounded-full border-4 border-white"
+                    />
+                  </div>
+                )}
+              </button>
 
             <button 
               onClick={nextWord}
@@ -534,43 +682,33 @@ export default function App() {
               <ChevronRight size={24} />
             </button>
           </div>
+        </div>
 
-          {/* Debug Log Interface if listening */}
-          {isListening && debugLog.length > 0 && (
-            <div className="w-full max-w-sm bg-slate-900/5 rounded-xl p-3 font-mono text-[9px] text-slate-500 space-y-1">
-              <p className="border-b border-slate-200 pb-1 mb-1 font-bold uppercase opacity-50">Mic Input Log (Last 5)</p>
-              {debugLog.map((log, i) => (
-                <p key={i} className="truncate select-all">{`>> ${log}`}</p>
-              ))}
-            </div>
-          )}
-
-          <div className="flex gap-2 p-1 bg-slate-200/50 rounded-lg text-[10px] font-bold text-slate-500 uppercase tracking-tight">
-            <span className="px-2 py-1 bg-white rounded shadow-sm text-blue-600">UNEMI 2026 Engine</span>
-            <span className="px-2 py-1">Phoneme Mapping V2.1</span>
+        {/* Debug Log Interface - Always Visible */}
+          <div className="w-full max-w-sm bg-slate-900/5 rounded-xl p-3 font-mono text-[9px] text-slate-500 space-y-1">
+            <p className="border-b border-slate-200 pb-1 mb-1 font-bold uppercase opacity-50 flex justify-between items-center">
+              <span>Mic Input Log (Last 10)</span>
+              {isListening && !isBlocked && <span className="text-blue-500 animate-pulse">● Live</span>}
+              {isListening && isBlocked && <span className="text-red-500 animate-pulse">● System Busy</span>}
+            </p>
+            {debugLog.length === 0 ? (
+              <p className="opacity-30 italic">No input yet...</p>
+            ) : (
+              debugLog.map((log, i) => (
+                <p key={i} className="truncate select-all transition-all">{`>> ${log}`}</p>
+              ))
+            )}
           </div>
         </div>
+
+        {/* Footer Branding */}
+        <footer className="w-full mt-auto py-8 flex flex-col items-center gap-2 opacity-30">
+          <div className="h-px w-12 bg-slate-200" />
+          <p className="text-[9px] font-black tracking-[0.5em] uppercase text-slate-900">
+            Spelling Bee <span className="text-blue-600">UNEMI</span> 2026
+          </p>
+        </footer>
       </main>
-
-      {/* Word List Footer */}
-      <footer className="h-24 bg-white border-t border-slate-200 px-6 flex items-center gap-4 overflow-hidden shrink-0">
-        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide no-scrollbar">
-          {currentWords.map((word, idx) => (
-            <div 
-              key={idx}
-              className={`
-                px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all shrink-0
-                ${idx === currentWordIndex 
-                  ? 'bg-amber-100 border border-amber-200 text-amber-700' 
-                  : 'bg-slate-50 text-slate-300 font-medium'}
-              `}
-            >
-              {word}
-            </div>
-          ))}
-        </div>
-      </footer>
-
     </div>
   );
 }
