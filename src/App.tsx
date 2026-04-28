@@ -527,14 +527,7 @@ export default function App() {
             </AnimatePresence>
           </div>
 
-          <div className={`text-[10px] font-mono tabular-nums px-2 py-1 rounded border hidden md:block ${
-            currentLevelColor === 'emerald' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
-            currentLevelColor === 'blue' ? 'bg-blue-50 text-blue-700 border-blue-100' :
-            currentLevelColor === 'indigo' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' :
-            'bg-violet-50 text-violet-700 border-violet-100'
-          }`}>
-            WORD {currentWordIndex + 1}/{currentWords.length}
-          </div>
+
         </div>
       </nav>
 
