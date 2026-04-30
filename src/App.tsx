@@ -49,6 +49,60 @@ const WORDS_BY_LEVEL: Record<string, string[]> = {
   ]
 };
 
+const HTML_WORDS = [
+  "Accurate", "Acknowledgment", "Acquaintance", "Activity", "Adventure", "Always",
+  "Ambiguous", "Answer", "Anxious", "Apprehensive", "Architecture", "Articulate",
+  "Assertive", "Assimilate", "Astonishing", "Autonomous", "Balance", "Benevolent",
+  "Between", "Biochemistry", "Book", "Bored", "Bottle", "Boy", "Break", "Brevity",
+  "Calendar", "Camouflage", "Capricious", "Career", "Challenge",
+  "Children", "Close", "Coherence", "Colloquial", "Complete", "Compliance",
+  "Computer", "Conscientious", "Control", "Controversial",
+  "Convoluted", "Country", "Curious", "Decide", "Dehydration",
+  "Dilemma", "Disappearance", "Discover", "Discrepancy", "Divulge", "Eloquent",
+  "Embarrassing", "Empirical", "Encounter", "Energy", "Enigmatic", "Environmentally",
+  "Ephemeral", "Exaggeration", "Face", "Fairness", "Famous", "Father", "Feel",
+  "Filmmaker", "Finger", "Flabbergasted", "Flower", "Focus", "Foster", "Friend",
+  "Gate", "Gather", "Handkerchief", "Help", "Honest", "Hypothetical",
+  "Imagine", "Impeccable", "Importune", "Improve", "Independence", "Indispensable",
+  "Ineffable", "Irreplaceable", "Journey", "Judgemental", "Knowledge", "Knowledgeable",
+  "Language", "Look", "Make", "Member", "Message", "Meticulous", "Misunderstood",
+  "Monday", "Movie", "Nature", "Near", "Neighborhood", "Night", "Notebook", "Notice",
+  "Observe", "Obsolete", "Often", "Outside", "Overwhelming", "Package", "Paradox",
+  "Patient", "Pencil", "People", "Perfect", "Perseverance", "Plausible", "Play",
+  "Please", "Popular", "Potato", "Practice", "Pragmatic", "Predicament", "Prepare",
+  "Present", "Protect", "Provide", "Psychologist", "Quarantine", "Quickly", "Reason",
+  "Recommendable", "Redundant", "Reiterate", "Resilient", "Respect", "Result", "Rich",
+  "School", "Secret", "Serious", "Shoes", "Small", "Sophisticated", "Speak", "Special",
+  "Spontaneous", "Spoon", "Sport", "Strong", "Student", "Subtle", "Suggest", "Talent",
+  "Taxonomy", "Teacher", "Think", "Travel", "Tree", "Unbelievable", "Unnecessary",
+  "Useful", "Vacation", "Wash", "Water", "Welcome", "Wisdom", "Yesterday"
+];
+
+const PHONETIC_GROUPS: Record<string, string[]> = {
+  'b': ['b', 'p', 'v', 'd'],
+  'p': ['p', 'b', 'v', 'd'],
+  'v': ['v', 'b', 'p', 'd'],
+  'd': ['d', 't', 'v', 'b'],
+  't': ['t', 'd'],
+  'c': ['z', 'c'],
+  'z': ['z', 'c']
+};
+
+const LETTER_NAMES: Record<string, string> = {
+  "bee": "b", "cee": "c", "dee": "d", "gee": "g", "jay": "j", "kay": "k", "pee": "p", "cue": "q",
+  "are": "r", "ess": "s", "tee": "t", "you": "u", "vee": "v", "double": "w", "ex": "x", "why": "y",
+  "zee": "z", "zed": "z", "aitch": "h", "en": "n", "em": "m", "oh": "o", "eff": "f", "ell": "l",
+  "eye": "i", "see": "c", "double-u": "w"
+};
+
+const VARIANTS: Record<string, string[]> = {
+  "practice": ["practice", "practise"],
+  "improve": ["improve"],
+  "predicament": ["predicament"]
+};
+
+const FORCE_LETTER_MODE = ["wisdom", "observe", "ambiguous"];
+
 const LEVELS: ("Beginner" | "Intermediate" | "Senior" | "Master")[] = ["Beginner", "Intermediate", "Senior", "Master"];
 
 const PHONETIC_MAP: Record<string, string> = {
@@ -82,12 +136,17 @@ const PHONETIC_MAP: Record<string, string> = {
 export default function App() {
   const [selectedLevels, setSelectedLevels] = useState<string[]>(["Beginner", "Intermediate", "Senior", "Master"]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  
+  const [isPhoneMode, setIsPhoneMode] = useState(false);
+  const [attemptHistory, setAttemptHistory] = useState<{ text: string, status: "✅" | "❌" }[]>([]);
+
   const currentWords = useMemo(() => {
+    if (isPhoneMode) {
+      return [...HTML_WORDS].sort(() => Math.random() - 0.5);
+    }
     const filtered = selectedLevels.flatMap(level => WORDS_BY_LEVEL[level] || []);
     const shuffled = filtered.length > 0 ? [...filtered].sort(() => Math.random() - 0.5) : ["No Words Selected"];
     return shuffled;
-  }, [selectedLevels]);
+  }, [selectedLevels, isPhoneMode]);
   
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
   const [spelledText, setSpelledText] = useState("");
@@ -129,6 +188,113 @@ export default function App() {
 
   const currentWord = currentWords[currentWordIndex] || currentWords[0] || "Default";
   const targetWord = currentWord.toLowerCase();
+
+  // Helper functions for Phone Mode
+  const isSimilarLetter = (a: string, b: string) => {
+    if (a === b) return true;
+    const group = PHONETIC_GROUPS[a] || [a];
+    return group.includes(b);
+  };
+
+  const compareLetterSequences = (spoken: string[], target: string[]) => {
+    if (spoken.length !== target.length) return false;
+    return spoken.every((char, i) => isSimilarLetter(char, target[i]));
+  };
+
+  const decodeLetterNames = (transcript: string) => {
+    const wordsSpoken = transcript.toLowerCase().split(/\s+/);
+    return wordsSpoken.map(w => LETTER_NAMES[w] || w).join('');
+  };
+
+  const isWholeWordSpeech = (transcript: string) => {
+    const words = transcript.trim().split(/\s+/);
+    if (words.length === 1) return true;
+    const longWords = words.filter(w => w.length > 1);
+    return longWords.length > words.length / 2;
+  };
+
+  const handleImPattern = (transcript: string, targetWord: string) => {
+    const lowerTarget = targetWord.toLowerCase();
+    if (!lowerTarget.startsWith('im')) return false;
+    const iamMatch = transcript.match(/^\s*i\s+am\s+(.+)$/i);
+    if (iamMatch) {
+      const letters = iamMatch[1].trim().split(/\s+/).map(part => part[0].toLowerCase()).join('');
+      const expectedLetters = lowerTarget.substring(2);
+      if (compareLetterSequences(letters.split(''), expectedLetters.split(''))) return true;
+    }
+    const imMatch = transcript.match(/^\s*i\s+m\s+(.+)$/i);
+    if (imMatch) {
+      const letters = imMatch[1].trim().split(/\s+/).map(part => part[0].toLowerCase()).join('');
+      const expectedLetters = lowerTarget.substring(2);
+      if (compareLetterSequences(letters.split(''), expectedLetters.split(''))) return true;
+    }
+    return false;
+  };
+
+  const handleUnPattern = (transcript: string, targetWord: string) => {
+    const lowerTarget = targetWord.toLowerCase();
+    if (!lowerTarget.startsWith('un')) return false;
+    const match = transcript.match(/^\s*you\s+and\s+(.+)$/i);
+    if (match) {
+      const letters = match[1].trim().split(/\s+/).map(p => p[0].toLowerCase()).join('');
+      const expected = lowerTarget.substring(2);
+      return compareLetterSequences(letters.split(''), expected.split(''));
+    }
+    return false;
+  };
+
+  const handleThePattern = (transcript: string, targetWord: string) => {
+    const theMatch = transcript.match(/^\s*the\s+(.+)$/i);
+    if (theMatch) {
+      const letters = theMatch[1].trim().split(/\s+/).map(part => part[0].toLowerCase()).join('');
+      const expectedLetters = targetWord.toLowerCase();
+      if (compareLetterSequences(letters.split(''), expectedLetters.split(''))) return true;
+    }
+    return false;
+  };
+
+  const handleLetterByLetterSpelling = (transcript: string, targetWord: string) => {
+    const cleanTranscript = transcript.replace(/^\s*the\s+/i, '').trim();
+    const spokenLetters = cleanTranscript.split(/\s+/).map(part => part[0].toLowerCase());
+    const targetLetters = targetWord.toLowerCase().split('');
+    if (spokenLetters.length === targetLetters.length && compareLetterSequences(spokenLetters, targetLetters)) return true;
+    return false;
+  };
+
+  const isSpellingMatch = useCallback((transcript: string, targetWord: string) => {
+    const possibleTargets = VARIANTS[targetWord.toLowerCase()] || [targetWord];
+    const cleanTranscriptFull = transcript.toLowerCase().trim();
+    
+    for (const tgt of possibleTargets) {
+      const lowerTgt = tgt.toLowerCase();
+      
+      // PRIORITY: extract first letters (fixes "psychology" issue)
+      const wordsOnly = cleanTranscriptFull.split(/\s+/);
+      const startIdx = (wordsOnly[0] === 'the') ? 1 : 0;
+      const extracted = wordsOnly.slice(startIdx).map(w => w[0]).join('');
+
+      if (extracted.length === lowerTgt.length && 
+          compareLetterSequences(extracted.split(''), lowerTgt.split(''))) return true;
+
+      if (cleanTranscriptFull.replace(/[^a-z]/g, '') === lowerTgt) return true;
+      if (lowerTgt.startsWith('im') && handleImPattern(cleanTranscriptFull, lowerTgt)) return true;
+      if (lowerTgt.startsWith('un') && handleUnPattern(cleanTranscriptFull, lowerTgt)) return true;
+      if (handleThePattern(cleanTranscriptFull, lowerTgt)) return true;
+      if (handleLetterByLetterSpelling(cleanTranscriptFull, lowerTgt)) return true;
+
+      const decodedLetters = decodeLetterNames(cleanTranscriptFull);
+      if (decodedLetters.replace(/[^a-z]/g, '') === lowerTgt) return true;
+
+      const spokenLettersNoSpaces = cleanTranscriptFull.replace(/\s+/g, '').toLowerCase();
+      if (spokenLettersNoSpaces.length === lowerTgt.length && 
+          compareLetterSequences(spokenLettersNoSpaces.split(''), lowerTgt.split(''))) return true;
+    }
+    return false;
+  }, [handleImPattern, handleUnPattern, handleThePattern, handleLetterByLetterSpelling, decodeLetterNames]);
+
+  const addAttempt = useCallback((text: string, isCorrect: boolean) => {
+    setAttemptHistory(prev => [{ text, status: isCorrect ? "✅" : "❌" }, ...prev].slice(0, 50));
+  }, []);
 
   // Voice synthesis
   const speak = useCallback((text: string) => {
@@ -250,9 +416,10 @@ export default function App() {
     }
 
     const recognition = new SpeechRecognition();
-    recognition.continuous = true;
+    recognition.continuous = false; // More reliable on mobile than continuous=true
     recognition.interimResults = true;
     recognition.lang = "en-US";
+    recognition.maxAlternatives = 1;
 
     recognition.onresult = (event: any) => {
       if (isSpeakingRef.current || isTransitioningRef.current) return;
@@ -266,6 +433,53 @@ export default function App() {
         } else {
           currentInterim += event.results[i][0].transcript;
         }
+      }
+
+      if (isPhoneMode) {
+        const display = (currentInterim + currentFinal).toLowerCase().trim();
+        if (display) setInterimText(display);
+        else setInterimText("");
+
+        if (currentFinal) {
+          const spokenRaw = currentFinal.trim();
+          const transcriptNormalized = spokenRaw.toLowerCase();
+          setDebugLog(prev => [spokenRaw, ...prev].slice(0, 10));
+
+          // Extract letters and check
+          const words = spokenRaw.split(/\s+/);
+          const extracted = words.map(w => w[0]).join('').toLowerCase();
+          const target = targetWord;
+
+          // ✅ If extracted letters match -> ACCEPT (even if engine merged it)
+          if (extracted.length === target.length && compareLetterSequences(extracted.split(''), target.split(''))) {
+            setIsListening(false);
+            recognitionRef.current?.stop();
+            handleCorrect(targetWord);
+            return;
+          }
+
+          // ❌ ONLY reject if clearly a real word (not letters)
+          if (!FORCE_LETTER_MODE.includes(target) && isWholeWordSpeech(spokenRaw)) {
+            addAttempt("Spell it letter by letter", false);
+            setInterimText("");
+            setDebugLog(prev => ["⚠️ You must spell the word", ...prev].slice(0, 10));
+            recognitionRef.current?.stop();
+            return;
+          }
+
+          // 🔥 THEN check correctness
+          if (isSpellingMatch(transcriptNormalized, targetWord)) {
+            setIsListening(false);
+            recognitionRef.current?.stop();
+            handleCorrect(targetWord);
+          } else {
+            addAttempt(spokenRaw, false);
+            setInterimText(""); // Clear interim on wrong final result to match mobile.html's blink behavior
+            setDebugLog(prev => [`❌ Not correct. Say letters like: ${targetWord.split('').join(' ')}`, ...prev].slice(0, 10));
+            recognitionRef.current?.stop();
+          }
+        }
+        return;
       }
 
       // Update Debug Log
@@ -306,28 +520,37 @@ export default function App() {
     };
 
     recognition.onend = () => {
-      // Only restart if the user still wants the mic on and we aren't transitioning between words
+      // Auto-restart pattern from mobile.html
       if (isListeningRef.current && !isTransitioningRef.current) {
-        try {
-          recognitionRef.current?.start();
-        } catch (e) {
-          // If start fails (e.g. already starting), wait a bit and try once more if still listening
-          setTimeout(() => {
-            if (isListeningRef.current) {
-              try {
-                recognitionRef.current?.start();
-              } catch (secondErr) {
-                console.warn("Auto-restart failed twice:", secondErr);
-                setIsListening(false);
-              }
+        setTimeout(() => {
+          if (isListeningRef.current) {
+            try {
+              recognitionRef.current?.start();
+            } catch (e) {
+              console.warn("Restart failed:", e);
             }
-          }, 300);
-        }
+          }
+        }, 200);
       }
     };
 
     recognitionRef.current = recognition;
   }, [cleanSpelling]); // Removed isListening from dependencies to avoid unnecessary re-initializations
+
+  const handleCorrect = (word: string) => {
+    setStatus("correct");
+    addAttempt(word, true);
+    setInterimText("🎉 Correct! Getting new word...");
+    setDebugLog(prev => ["✅ Perfect! Next word...", ...prev].slice(0, 10));
+    isTransitioningRef.current = true;
+    
+    if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+    transitionTimerRef.current = setTimeout(() => {
+      nextWord();
+      isTransitioningRef.current = false;
+      transitionTimerRef.current = null;
+    }, 1000);
+  };
 
   const toggleMic = () => {
     if (isListening) {
@@ -369,7 +592,7 @@ export default function App() {
 
   // Check correctness
   useEffect(() => {
-    if (currentWords[0] === "No Words Selected") return;
+    if (isPhoneMode || currentWords[0] === "No Words Selected") return;
 
     const currentFullSpelling = (spelledText + interimText).replace(/\s/g, "");
     
@@ -470,6 +693,18 @@ export default function App() {
         </div>
         
         <div className="flex items-center gap-4">
+          <button 
+            onClick={() => {
+              setIsPhoneMode(!isPhoneMode);
+              setAttemptHistory([]);
+              resetWordProgress();
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${isPhoneMode ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'}`}
+          >
+            {isPhoneMode ? <Zap className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
+            {isPhoneMode ? "PHONE MODE" : "BEE MODE"}
+          </button>
+
           {/* Level Selector Menu */}
           <div className="relative">
             <button 
@@ -535,7 +770,9 @@ export default function App() {
       <main className="flex-1 flex flex-col items-center justify-center px-6 md:px-20 py-8 space-y-8">
         {/* Word Challenge Header - Sized Reduced to 28%/30% */}
         <div className="text-center space-y-1">
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Current Word</span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
+            {isPhoneMode ? "PHONE MODE ACTIVE" : "CURRENT WORD"}
+          </span>
           <motion.h1
             key={currentWord}
             initial={{ opacity: 0, scale: 0.95 }}
@@ -544,24 +781,61 @@ export default function App() {
           >
             {isWordHidden ? "••••••" : currentWord}
           </motion.h1>
-          <div className="flex items-center justify-center gap-2">
+          
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
             <button 
               onClick={() => speak(currentWord)}
-              className="flex items-center gap-2 px-5 py-2 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-all text-[11px] font-bold uppercase tracking-widest shadow-md shadow-blue-100 active:scale-95"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-all text-[11px] font-bold uppercase tracking-widest shadow-md shadow-blue-100 active:scale-95"
             >
               <Volume2 className="w-4 h-4" />
               Listen
             </button>
             <button 
               onClick={() => setIsWordHidden(!isWordHidden)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all text-[11px] font-bold uppercase tracking-widest active:scale-95 ${isWordHidden ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200 hover:text-slate-600 hover:bg-slate-100'}`}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-full border transition-all text-[11px] font-bold uppercase tracking-widest active:scale-95 ${isWordHidden ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200 hover:text-slate-600 hover:bg-slate-100'}`}
               title={isWordHidden ? "Unhide Word" : "Hide Word"}
             >
               {isWordHidden ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
               {isWordHidden ? "Unhide" : "Hide"}
             </button>
+            
+            {/* Button "start spelling" removed per request */}
           </div>
         </div>
+
+        {/* Attempt History - Only in Phone Mode */}
+        <AnimatePresence>
+          {isPhoneMode && (
+            <motion.div 
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="w-full max-w-2xl bg-amber-50/50 rounded-3xl border border-amber-100 p-4 space-y-3"
+            >
+              <div className="flex items-center gap-2 px-2 border-b border-amber-200 pb-2">
+                <RotateCcw className="w-3 h-3 text-amber-600" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-amber-900/50">History Log</span>
+              </div>
+              <div className="flex flex-col gap-2 max-h-32 overflow-y-auto px-1">
+                {attemptHistory.length === 0 ? (
+                  <p className="text-[10px] text-amber-800/40 italic text-center py-4">No attempts yet. Start spelling...</p>
+                ) : (
+                  attemptHistory.map((attempt, i) => (
+                    <motion.div 
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      key={i} 
+                      className="flex items-center gap-3 bg-white/60 p-2 rounded-xl border border-white"
+                    >
+                      <span className="text-xs">{attempt.status}</span>
+                      <span className="text-xs font-medium text-amber-950 font-mono">{attempt.text}</span>
+                    </motion.div>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Spelling Card */}
         <div className="w-full max-w-2xl min-h-[140px] bg-white rounded-[2rem] border-2 border-slate-200 shadow-xl flex flex-col items-center justify-center gap-4 p-6 relative overflow-hidden">
@@ -570,34 +844,64 @@ export default function App() {
             <div className="flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${isListening ? 'bg-blue-500 animate-pulse' : 'bg-slate-300'}`}></div>
               <span className={`text-[9px] font-bold uppercase tracking-widest ${isListening ? 'text-blue-600' : 'text-slate-400'}`}>
-                {isListening ? "Listening, speak now" : "Microphone Off"}
+                {isListening ? (isBlocked ? "System Busy" : "Listening, speak now") : "Microphone Off"}
               </span>
             </div>
           </div>
 
-          {/* Letter Grid - Reduced to 28% on phones */}
-          <div className="flex flex-wrap gap-2 md:gap-4 justify-center items-center mt-4">
-            {targetWord.split('').map((char, idx) => {
-              const spelledChar = (spelledText + interimText)[idx];
-              const isCorrect = isCharCorrect(idx, spelledChar);
-              const isPending = !spelledChar;
-              const isWrong = spelledChar && !isCorrect;
+          {/* Phone Mode Transcription Display */}
+          <AnimatePresence>
+            {isPhoneMode && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="w-full flex flex-col gap-4"
+              >
+                {/* Live Area styled from mobile.html */}
+                <div className="bg-[#eef2ff] rounded-[38px] px-[18px] py-[8px] min-h-[60px] flex items-center justify-center text-center shadow-inner border border-blue-50">
+                  <div className="text-[#0a2f44] font-mono font-medium text-lg break-words">
+                    {interimText || ""}
+                  </div>
+                </div>
+                
+                {/* Status Badge - Removed Box with "🎧 Ready — Press Start Spelling" */}
+                {isListening && (
+                  <div className="bg-[#dee5f0] text-[#1f3b4c] text-[14px] font-medium px-6 py-2.5 rounded-full self-center flex items-center gap-2 shadow-sm">
+                    <div className={`w-2 h-2 rounded-full ${isListening ? 'bg-blue-500 animate-pulse' : 'bg-slate-400'}`}></div>
+                    <span>
+                      {debugLog[0]?.startsWith("❌") || debugLog[0]?.startsWith("⚠️") ? debugLog[0] : (debugLog[0] ? `👂 "${debugLog[0]}"` : "Listening...")}
+                    </span>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-              return (
-                <motion.span
-                  key={idx}
-                  className={`
-                    text-[1rem] md:text-5xl font-mono font-bold leading-none
-                    ${isPending ? 'text-slate-200' : ''}
-                    ${isCorrect ? 'text-emerald-500' : ''}
-                    ${isWrong ? 'text-red-500' : ''}
-                  `}
-                >
-                  {spelledChar || "_"}
-                </motion.span>
-              );
-            })}
-          </div>
+          {/* Letter Grid - Only show if not hide mode, or show dots */}
+          {!isPhoneMode && (
+            <div className="flex flex-wrap gap-2 md:gap-4 justify-center items-center mt-4">
+              {targetWord.split('').map((char, idx) => {
+                const spelledChar = (spelledText + interimText)[idx];
+                const isCorrect = isCharCorrect(idx, spelledChar);
+                const isPending = !spelledChar;
+                const isWrong = spelledChar && !isCorrect;
+
+                return (
+                  <motion.span
+                    key={idx}
+                    className={`
+                      text-[1rem] md:text-5xl font-mono font-bold leading-none
+                      ${isPending ? 'text-slate-200' : ''}
+                      ${isCorrect ? 'text-emerald-500' : ''}
+                      ${isWrong ? 'text-red-500' : ''}
+                    `}
+                  >
+                    {spelledChar || "_"}
+                  </motion.span>
+                );
+              })}
+            </div>
+          )}
 
           {/* Correct Feedback Text (Simple) */}
           <AnimatePresence>
@@ -677,7 +981,8 @@ export default function App() {
           </div>
         </div>
 
-        {/* Debug Log Interface - Always Visible */}
+        {/* Debug Log Interface - Visible only in Bee Mode or for devs */}
+        {!isPhoneMode && (
           <div className="w-full max-w-sm bg-slate-900/5 rounded-xl p-3 font-mono text-[9px] text-slate-500 space-y-1">
             <p className="border-b border-slate-200 pb-1 mb-1 font-bold uppercase opacity-50 flex justify-between items-center">
               <span>Mic Input Log (Last 10)</span>
@@ -692,6 +997,7 @@ export default function App() {
               ))
             )}
           </div>
+        )}
         </div>
 
         {/* Footer Branding */}
