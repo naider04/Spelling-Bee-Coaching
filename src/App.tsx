@@ -103,7 +103,7 @@ const VARIANTS: Record<string, string[]> = {
 
 const FORCE_LETTER_MODE = ["wisdom", "observe", "ambiguous"];
 
-const LEVELS: ("Beginner" | "Intermediate" | "Senior" | "Master")[] = ["Beginner", "Intermediate", "Senior", "Master"];
+const LEVELS = ["Beginner", "Intermediate", "Senior", "Master", "Custom"];
 
 const PHONETIC_MAP: Record<string, string> = {
   "i am": "im",
@@ -130,11 +130,15 @@ const PHONETIC_MAP: Record<string, string> = {
   "ex": "x",
   "why": "y",
   "zee": "z",
-  "double you": "w"
+  "double you": "w",
+  "d": "t",
+  "t": "d",
+  "hey": "a"
 };
 
 export default function App() {
   const [selectedLevels, setSelectedLevels] = useState<string[]>(["Beginner", "Intermediate", "Senior", "Master"]);
+  const [customWordsText, setCustomWordsText] = useState("Apple, Banana, Orange");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isPhoneMode, setIsPhoneMode] = useState(false);
   const [attemptHistory, setAttemptHistory] = useState<{ text: string, status: "✅" | "❌" }[]>([]);
@@ -143,10 +147,26 @@ export default function App() {
     if (isPhoneMode) {
       return [...HTML_WORDS].sort(() => Math.random() - 0.5);
     }
-    const filtered = selectedLevels.flatMap(level => WORDS_BY_LEVEL[level] || []);
-    const shuffled = filtered.length > 0 ? [...filtered].sort(() => Math.random() - 0.5) : ["No Words Selected"];
+    
+    let allWords: string[] = [];
+    
+    if (selectedLevels.includes("Custom")) {
+      const custom = customWordsText
+        .split(/[,\n\s]+/)
+        .map(w => w.trim())
+        .filter(w => w.length > 0 && w.length < 50); // Sanity check on word length
+      allWords = [...allWords, ...custom];
+    }
+    
+    const levelWords = selectedLevels
+      .filter(l => l !== "Custom")
+      .flatMap(level => WORDS_BY_LEVEL[level] || []);
+      
+    allWords = [...allWords, ...levelWords];
+
+    const shuffled = allWords.length > 0 ? [...allWords].sort(() => Math.random() - 0.5) : ["No Words Selected"];
     return shuffled;
-  }, [selectedLevels, isPhoneMode]);
+  }, [selectedLevels, isPhoneMode, customWordsText]);
   
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
   const [spelledText, setSpelledText] = useState("");
@@ -365,11 +385,26 @@ export default function App() {
 
   // Phonetic cleaning with anti-pronunciation check
   const cleanSpelling = useCallback((text: string) => {
+    // 1. Pre-process for patterns like "I am" or "SM"
+    const lowerText = text.toLowerCase().trim();
+    
+    // Quick match for targetWord (autocorrected whole word)
+    if (lowerText === targetWord) return targetWord;
+
+    // Special case for "I am" pattern observed in logs
+    if (lowerText.startsWith("i am ") && targetWord.toLowerCase().startsWith("im")) {
+      const rest = lowerText.substring(5).replace(/\s/g, "");
+      const targetRest = targetWord.toLowerCase().substring(2);
+      if (rest === targetRest || rest[0] === targetRest[0]) {
+         return "im" + rest;
+      }
+    }
+
     // Split by whitespace to get distinct utterances
-    let rawSegments = text.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "").trim().split(/\s+/);
+    let rawSegments = lowerText.replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "").split(/\s+/);
     
     let cleaned = rawSegments.map(segment => {
-      // 1. Check direct phonetic map (e.g., "double you", "em", "en")
+      // 1. Check direct phonetic map (e.g., "double you", "em", "en", "d" -> "t")
       if (PHONETIC_MAP[segment]) return PHONETIC_MAP[segment];
       
       // 2. If it's a single letter, it's valid spelling
@@ -378,13 +413,19 @@ export default function App() {
       // 3. Special case for "i am" or "i'm" which might not split correctly depending on browser
       if (segment === "im" || segment === "i'm") return "im";
 
-      // 4. Fallback: if the segment is short (2-3 chars) and not the target word, 
+      // 4. Handle "SM" misrecognition for "small"
+      if (segment === "sm" && targetWord.toLowerCase() === "small") return "sm";
+
+      // 5. Fallback: if the segment matches the target word exactly (autocorrect)
+      if (segment === targetWord.toLowerCase()) return segment;
+
+      // 6. Fallback: if the segment is short (2-3 chars) and not the target word, 
       // maybe it's a misheard letter. Let's try to take just the first char.
-      if (segment.length <= 3 && segment !== targetWord) {
+      if (segment.length <= 3) {
         return segment[0];
       }
 
-      // 5. Reject anything longer than 3 chars as it's likely a whole word pronunciation
+      // 7. Reject anything longer than 3 chars as it's likely a whole word pronunciation
       return "";
     }).join("");
 
@@ -399,10 +440,11 @@ export default function App() {
     
     const equivalents: Record<string, string[]> = {
       'v': ['d', 'b'],
-      'd': ['v', 'z'],
+      'd': ['v', 'z', 't'],
       'z': ['d'],
       'b': ['p', 'v'],
-      'p': ['b']
+      'p': ['b'],
+      't': ['d']
     };
 
     return equivalents[targetChar]?.includes(inputChar) || false;
@@ -483,16 +525,48 @@ export default function App() {
       }
 
       // Update Debug Log
-      if (currentFinal || currentInterim) {
-        setDebugLog(prev => [currentFinal || currentInterim, ...prev].slice(0, 10));
-      }
+        if (currentFinal || currentInterim) {
+          const logText = currentFinal || currentInterim;
+          setDebugLog(prev => [logText, ...prev].slice(0, 16));
 
-      if (currentFinal) {
-        setSpelledText(prev => {
-          const cleanedSegment = cleanSpelling(currentFinal);
-          return prev + cleanedSegment;
-        });
-      }
+          // Quick check for whole word match (autocorrect fix)
+          const normalizedInput = (currentFinal || currentInterim).toLowerCase().trim().replace(/[.,!?]/g, "");
+          
+          const QUICK_ACCEPTS: Record<string, string[]> = {
+            "obsolete": ["obsolette"],
+            "psychologist": ["psychology", "psychologists", "psicology", "psychologies"],
+            "small": ["sm"],
+            "anxious": ["anxios"],
+            "sophisticated": ["sofisticated"],
+            "assertive": ["asertive"],
+            "misunderstood": ["misunderstood"],
+            "embarrassing": ["embarassing"],
+            "unnecessary": ["unneccessary"],
+            "serious": ["serious"]
+          };
+
+          const isDirectMatch = normalizedInput === targetWord.toLowerCase();
+          const isQuickAccept = QUICK_ACCEPTS[targetWord.toLowerCase()]?.includes(normalizedInput);
+
+          if (isDirectMatch || isQuickAccept) {
+            recognitionRef.current?.stop();
+            handleCorrect(targetWord);
+            return;
+          }
+        }
+
+        if (currentFinal) {
+          setSpelledText(prev => {
+            const cleanedSegment = cleanSpelling(currentFinal);
+            
+            // If the cleaned segment IS the target word, just set it to the target word
+            if (cleanedSegment.toLowerCase() === targetWord.toLowerCase()) {
+              return targetWord.toLowerCase();
+            }
+            
+            return (prev + cleanedSegment).toLowerCase();
+          });
+        }
       
       setInterimText(cleanSpelling(currentInterim));
     };
@@ -537,11 +611,23 @@ export default function App() {
     recognitionRef.current = recognition;
   }, [cleanSpelling]); // Removed isListening from dependencies to avoid unnecessary re-initializations
 
-  const handleCorrect = (word: string) => {
+  const resetWordProgress = useCallback(() => {
+    setSpelledText("");
+    setInterimText("");
+    setStatus("idle");
+    setDebugLog([]);
+  }, []);
+
+  const nextWord = useCallback(() => {
+    setCurrentWordIndex((prev) => (prev + 1) % currentWords.length);
+    resetWordProgress();
+  }, [currentWords.length, resetWordProgress]);
+
+  const handleCorrect = useCallback((word: string) => {
     setStatus("correct");
     addAttempt(word, true);
-    setInterimText("🎉 Correct! Getting new word...");
-    setDebugLog(prev => ["✅ Perfect! Next word...", ...prev].slice(0, 10));
+    setInterimText("..."); // Less dramatic transition text
+    setDebugLog(prev => ["✅ Perfect! Next word...", ...prev].slice(0, 16));
     isTransitioningRef.current = true;
     
     if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
@@ -549,8 +635,19 @@ export default function App() {
       nextWord();
       isTransitioningRef.current = false;
       transitionTimerRef.current = null;
-    }, 1000);
-  };
+      
+      // Force mic restart if it should be listening but stopped
+      if (isListeningRef.current) {
+        try {
+          if (recognitionRef.current && recognitionRef.current.readyState !== 'listening') {
+            recognitionRef.current?.start();
+          }
+        } catch (e) {
+          // Ignore "already started" errors
+        }
+      }
+    }, 1200);
+  }, [addAttempt, nextWord]);
 
   const toggleMic = () => {
     if (isListening) {
@@ -577,18 +674,6 @@ export default function App() {
       }, 50);
     }
   };
-
-  const resetWordProgress = useCallback(() => {
-    setSpelledText("");
-    setInterimText("");
-    setStatus("idle");
-    setDebugLog([]);
-  }, []);
-
-  const nextWord = useCallback(() => {
-    setCurrentWordIndex((prev) => (prev + 1) % currentWords.length);
-    resetWordProgress();
-  }, [currentWords.length, resetWordProgress]);
 
   // Check correctness
   useEffect(() => {
@@ -628,8 +713,11 @@ export default function App() {
       transitionTimerRef.current = setTimeout(() => {
         nextWord();
         transitionTimerRef.current = null;
+        // isTransitioningRef.current = false; will be handled by nextWord calling reset or manual reset?
+        // Wait, handleCorrect does this better.
+        isTransitioningRef.current = false;
       }, 1000);
-    } else if (currentFullSpelling.length > 0 && status !== "correct") {
+    } else if (currentFullSpelling.length > 0 && status !== "correct" && !isTransitioningRef.current) {
       // Incremental error checking
       let hasError = false;
       for (let i = 0; i < currentFullSpelling.length; i++) {
@@ -663,16 +751,17 @@ export default function App() {
     // Find which level this word belongs to
     const level = Object.entries(WORDS_BY_LEVEL).find(([_, words]) => 
       words.includes(currentWord)
-    )?.[0] || "Beginner";
+    )?.[0] || (selectedLevels.includes("Custom") && customWordsText.includes(currentWord) ? "Custom" : "Beginner");
 
     switch(level) {
       case "Beginner": return "emerald";
       case "Intermediate": return "blue";
       case "Senior": return "indigo";
       case "Master": return "violet";
+      case "Custom": return "amber";
       default: return "emerald";
     }
-  }, [currentWord]);
+  }, [currentWord, customWordsText, selectedLevels]);
 
   const isBlocked = isListening && (isSpeaking || status === "correct" || isTransitioningRef.current);
 
@@ -693,18 +782,6 @@ export default function App() {
         </div>
         
         <div className="flex items-center gap-4">
-          <button 
-            onClick={() => {
-              setIsPhoneMode(!isPhoneMode);
-              setAttemptHistory([]);
-              resetWordProgress();
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${isPhoneMode ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-700'}`}
-          >
-            {isPhoneMode ? <Zap className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
-            {isPhoneMode ? "PHONE MODE" : "BEE MODE"}
-          </button>
-
           {/* Level Selector Menu */}
           <div className="relative">
             <button 
@@ -729,33 +806,57 @@ export default function App() {
                     initial={{ opacity: 0, scale: 0.95, y: 10 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                    className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2 space-y-1"
+                    className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2 space-y-2"
                   >
-                    {LEVELS.map(level => (
-                      <button
-                        key={level}
-                        onClick={() => toggleLevel(level)}
-                        className={`
-                          w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold transition-all
-                          ${selectedLevels.includes(level) 
-                            ? (level === "Beginner" ? 'bg-emerald-50 text-emerald-700' : 
-                               level === "Intermediate" ? 'bg-blue-50 text-blue-700' :
-                               level === "Senior" ? 'bg-indigo-50 text-indigo-700' :
-                               'bg-violet-50 text-violet-700')
-                            : 'text-slate-400 hover:bg-slate-50'}
-                        `}
-                      >
-                        {level}
-                        {selectedLevels.includes(level) && (
-                          <CheckCircle2 className={`w-3 h-3 ${
-                            level === "Beginner" ? 'text-emerald-500' : 
-                            level === "Intermediate" ? 'text-blue-500' :
-                            level === "Senior" ? 'text-indigo-500' :
-                            'text-violet-500'
-                          }`} />
-                        )}
-                      </button>
-                    ))}
+                    <div className="grid grid-cols-2 gap-1">
+                      {LEVELS.map(level => (
+                        <button
+                          key={level}
+                          onClick={() => toggleLevel(level)}
+                          className={`
+                            w-full flex items-center justify-between px-3 py-2 rounded-lg text-[10px] md:text-xs font-bold transition-all
+                            ${selectedLevels.includes(level) 
+                              ? (level === "Beginner" ? 'bg-emerald-50 text-emerald-700' : 
+                                 level === "Intermediate" ? 'bg-blue-50 text-blue-700' :
+                                 level === "Senior" ? 'bg-indigo-50 text-indigo-700' :
+                                 level === "Master" ? 'bg-violet-50 text-violet-700' :
+                                 'bg-amber-50 text-amber-700')
+                              : 'text-slate-400 hover:bg-slate-50'}
+                          `}
+                        >
+                          {level}
+                          {selectedLevels.includes(level) && (
+                            <CheckCircle2 className={`w-3 h-3 ${
+                              level === "Beginner" ? 'text-emerald-500' : 
+                              level === "Intermediate" ? 'text-blue-500' :
+                              level === "Senior" ? 'text-indigo-500' :
+                              level === "Master" ? 'text-violet-500' :
+                              'text-amber-500'
+                            }`} />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+
+                    {selectedLevels.includes("Custom") && (
+                      <div className="border-t border-slate-100 pt-3 px-2 pb-1 space-y-2">
+                        <div className="flex flex-col gap-1">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Edit Custom Words</label>
+                          <p className="text-[9px] text-slate-400 leading-tight">
+                            Write your words below. Separate each word using a <span className="text-amber-600 font-bold">comma</span>, <span className="text-amber-600 font-bold">space</span>, or <span className="text-amber-600 font-bold">new line</span>.
+                          </p>
+                        </div>
+                        <textarea
+                          value={customWordsText}
+                          onChange={(e) => setCustomWordsText(e.target.value)}
+                          placeholder="Enter words here..."
+                          className="w-full h-32 px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all resize-none"
+                        />
+                        <div className="text-[9px] text-slate-400 italic">
+                          Example: Apple, Banana, Orange
+                        </div>
+                      </div>
+                    )}
                   </motion.div>
                 </>
               )}
@@ -903,15 +1004,15 @@ export default function App() {
             </div>
           )}
 
-          {/* Correct Feedback Text (Simple) */}
+                {/* Correct Feedback Text (Simple) */}
           <AnimatePresence>
             {status === "correct" && (
               <motion.div 
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="text-emerald-600 font-bold uppercase tracking-[0.3em] text-xs"
+                className="text-emerald-500 font-bold uppercase tracking-[0.3em] text-sm md:text-base animate-bounce"
               >
-                Correct!
+                ✓ Correct!
               </motion.div>
             )}
           </AnimatePresence>
@@ -985,16 +1086,28 @@ export default function App() {
         {!isPhoneMode && (
           <div className="w-full max-w-sm bg-slate-900/5 rounded-xl p-3 font-mono text-[9px] text-slate-500 space-y-1">
             <p className="border-b border-slate-200 pb-1 mb-1 font-bold uppercase opacity-50 flex justify-between items-center">
-              <span>Mic Input Log (Last 10)</span>
+              <span className="flex items-center gap-2">
+                Mic Input Log (Last 16)
+                <button 
+                  onClick={() => {
+                    navigator.clipboard.writeText(debugLog.join('\n'));
+                  }}
+                  className="bg-slate-200 hover:bg-slate-300 text-[8px] px-1.5 py-0.5 rounded transition-colors text-slate-600"
+                >
+                  Copy
+                </button>
+              </span>
               {isListening && !isBlocked && <span className="text-blue-500 animate-pulse">● Live</span>}
               {isListening && isBlocked && <span className="text-red-500 animate-pulse">● System Busy</span>}
             </p>
             {debugLog.length === 0 ? (
               <p className="opacity-30 italic">No input yet...</p>
             ) : (
-              debugLog.map((log, i) => (
-                <p key={i} className="truncate select-all transition-all">{`>> ${log}`}</p>
-              ))
+              <div className="max-h-48 overflow-y-auto scrollbar-hide">
+                {debugLog.map((log, i) => (
+                  <p key={i} className="truncate select-all transition-all border-b border-slate-100 last:border-0 py-0.5">{`>> ${log}`}</p>
+                ))}
+              </div>
             )}
           </div>
         )}
