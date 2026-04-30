@@ -105,6 +105,12 @@ const FORCE_LETTER_MODE = ["wisdom", "observe", "ambiguous"];
 
 const LEVELS = ["Beginner", "Intermediate", "Senior", "Master", "Custom"];
 
+const WORDS_ALLOWED_AUTOCORRECT = new Set([
+  "sophisticated", "anxious", "assertive", "misunderstood", "observe", 
+  "wash", "embarrassing", "unnecessary", "serious", "obsolete", 
+  "psychologist", "small", "impeccable", "answer"
+]);
+
 const PHONETIC_MAP: Record<string, string> = {
   "i am": "im",
   "i'm": "im",
@@ -130,10 +136,7 @@ const PHONETIC_MAP: Record<string, string> = {
   "ex": "x",
   "why": "y",
   "zee": "z",
-  "double you": "w",
-  "d": "t",
-  "t": "d",
-  "hey": "a"
+  "double you": "w"
 };
 
 export default function App() {
@@ -388,8 +391,9 @@ export default function App() {
     // 1. Pre-process for patterns like "I am" or "SM"
     const lowerText = text.toLowerCase().trim();
     
-    // Quick match for targetWord (autocorrected whole word)
-    if (lowerText === targetWord) return targetWord;
+    // Quick match for targetWord (autocorrected whole word) - ONLY for whitelisted words
+    const lowerTextNoSpaces = lowerText.replace(/\s+/g, "");
+    if (WORDS_ALLOWED_AUTOCORRECT.has(targetWord) && (lowerText === targetWord || lowerTextNoSpaces === targetWord)) return targetWord;
 
     // Special case for "I am" pattern observed in logs
     if (lowerText.startsWith("i am ") && targetWord.toLowerCase().startsWith("im")) {
@@ -416,8 +420,8 @@ export default function App() {
       // 4. Handle "SM" misrecognition for "small"
       if (segment === "sm" && targetWord.toLowerCase() === "small") return "sm";
 
-      // 5. Fallback: if the segment matches the target word exactly (autocorrect)
-      if (segment === targetWord.toLowerCase()) return segment;
+      // 5. Fallback: if the segment matches the target word exactly (autocorrect) - ONLY for whitelisted words
+      if (WORDS_ALLOWED_AUTOCORRECT.has(targetWord) && segment === targetWord.toLowerCase()) return segment;
 
       // 6. Fallback: if the segment is short (2-3 chars) and not the target word, 
       // maybe it's a misheard letter. Let's try to take just the first char.
@@ -530,7 +534,8 @@ export default function App() {
           setDebugLog(prev => [logText, ...prev].slice(0, 16));
 
           // Quick check for whole word match (autocorrect fix)
-          const normalizedInput = (currentFinal || currentInterim).toLowerCase().trim().replace(/[.,!?]/g, "");
+          const transcriptFull = (currentFinal || currentInterim).toLowerCase().trim().replace(/[.,!?]/g, "");
+          const normalizedNoSpaces = transcriptFull.replace(/\s+/g, "");
           
           const QUICK_ACCEPTS: Record<string, string[]> = {
             "obsolete": ["obsolette"],
@@ -542,11 +547,14 @@ export default function App() {
             "misunderstood": ["misunderstood"],
             "embarrassing": ["embarassing"],
             "unnecessary": ["unneccessary"],
-            "serious": ["serious"]
+            "serious": ["serious"],
+            "answer": ["ans wer"]
           };
 
-          const isDirectMatch = normalizedInput === targetWord.toLowerCase();
-          const isQuickAccept = QUICK_ACCEPTS[targetWord.toLowerCase()]?.includes(normalizedInput);
+          const isDirectMatch = WORDS_ALLOWED_AUTOCORRECT.has(targetWord.toLowerCase()) && 
+                               (transcriptFull === targetWord.toLowerCase() || normalizedNoSpaces === targetWord.toLowerCase());
+          const isQuickAccept = QUICK_ACCEPTS[targetWord.toLowerCase()]?.includes(transcriptFull) || 
+                                QUICK_ACCEPTS[targetWord.toLowerCase()]?.includes(normalizedNoSpaces);
 
           if (isDirectMatch || isQuickAccept) {
             recognitionRef.current?.stop();
@@ -626,6 +634,7 @@ export default function App() {
   const handleCorrect = useCallback((word: string) => {
     setStatus("correct");
     addAttempt(word, true);
+    setSpelledText(word.toLowerCase()); // Ensure UI shows correct spelling regardless of phonetic substitutes used
     setInterimText("..."); // Less dramatic transition text
     setDebugLog(prev => ["✅ Perfect! Next word...", ...prev].slice(0, 16));
     isTransitioningRef.current = true;
