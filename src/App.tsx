@@ -945,7 +945,7 @@ export default function App() {
           >
             <div className="text-center space-y-4 mb-8">
               <div className="w-16 h-16 bg-amber-400 rounded-2xl mx-auto flex items-center justify-center text-3xl shadow-lg border border-amber-300">🐝</div>
-              <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Welcome, Student!</h2>
+              <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Welcome!</h2>
               <p className="text-sm text-slate-500 font-medium">Please enter your name to start your practice session and track your progress.</p>
             </div>
             
