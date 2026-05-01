@@ -113,12 +113,34 @@ const PHONETIC_MAP: Record<string, string> = {
 };
 
 export default function App() {
-  const [user, setUser] = useState<{ id: string, name: string } | null>(null);
+  const [user, setUser] = useState<{ id: string, name: string } | null>(() => {
+    const saved = localStorage.getItem("spellingBeeUser");
+    return saved ? JSON.parse(saved) : null;
+  });
   const [userNameInput, setUserNameInput] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const sessionStartTimeRef = useRef<number | null>(null);
+
+  // Initialize Firebase Auth session if user exists in localStorage
+  useEffect(() => {
+    if (user && !auth.currentUser) {
+      initAuth().then(authUser => {
+        if (authUser) {
+          // Restart a session for the returning user
+          addDoc(collection(db, "sessions"), {
+            userId: authUser.uid,
+            userName: user.name,
+            startTime: serverTimestamp()
+          }).then(sessionRef => {
+            sessionIdRef.current = sessionRef.id;
+            sessionStartTimeRef.current = Date.now();
+          });
+        }
+      });
+    }
+  }, []);
 
   const [selectedLevels, setSelectedLevels] = useState<string[]>(["Beginner", "Intermediate", "Senior", "Master"]);
   const [wordLists, setWordLists] = useState<Record<string, string>>({
@@ -857,12 +879,14 @@ export default function App() {
         lastActive: serverTimestamp()
       });
       
-      setUser({ id: authUser.uid, name: userNameInput.trim() });
+      const userData = { id: authUser.uid, name: userNameInput.trim() };
+      setUser(userData);
+      localStorage.setItem("spellingBeeUser", JSON.stringify(userData));
       
       // Start Session
       const sessionRef = await addDoc(collection(db, "sessions"), {
         userId: authUser.uid,
-        userName: userNameInput.trim(),
+        userName: userData.name,
         startTime: serverTimestamp()
       });
       sessionIdRef.current = sessionRef.id;
@@ -1005,7 +1029,21 @@ export default function App() {
           </div>
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 md:gap-4">
+          {user && (
+            <button 
+              onClick={() => {
+                if (confirm("Do you want to sign out and change your name?")) {
+                  localStorage.removeItem("spellingBeeUser");
+                  window.location.reload();
+                }
+              }}
+              className="flex flex-col items-end mr-1 md:mr-2 hover:opacity-70 transition-opacity whitespace-nowrap"
+            >
+              <span className="text-[7px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">Student</span>
+              <span className="text-[10px] md:text-sm font-black text-slate-900">{user.name}</span>
+            </button>
+          )}
           {/* Level Selector Menu */}
           <div className="relative">
             <button 
