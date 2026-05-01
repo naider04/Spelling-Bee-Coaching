@@ -116,6 +116,7 @@ export default function App() {
   const [user, setUser] = useState<{ id: string, name: string } | null>(null);
   const [userNameInput, setUserNameInput] = useState("");
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const sessionStartTimeRef = useRef<number | null>(null);
 
@@ -841,29 +842,38 @@ export default function App() {
     if (!userNameInput.trim()) return;
     
     setIsLoggingIn(true);
+    setLoginError(null);
     try {
       const authUser = await initAuth();
-      if (authUser) {
-        const userRef = doc(db, "users", authUser.uid);
-        await setDoc(userRef, {
-          name: userNameInput.trim(),
-          totalTimeSeconds: 0,
-          lastActive: serverTimestamp()
-        });
-        
-        setUser({ id: authUser.uid, name: userNameInput.trim() });
-        
-        // Start Session
-        const sessionRef = await addDoc(collection(db, "sessions"), {
-          userId: authUser.uid,
-          userName: userNameInput.trim(),
-          startTime: serverTimestamp()
-        });
-        sessionIdRef.current = sessionRef.id;
-        sessionStartTimeRef.current = Date.now();
+      if (!authUser) {
+        setLoginError("Could not connect to authentication service. Please ensure 'Anonymous Sign-in' is enabled in your Firebase console.");
+        return;
       }
-    } catch (error) {
+
+      const userRef = doc(db, "users", authUser.uid);
+      await setDoc(userRef, {
+        name: userNameInput.trim(),
+        totalTimeSeconds: 0,
+        lastActive: serverTimestamp()
+      });
+      
+      setUser({ id: authUser.uid, name: userNameInput.trim() });
+      
+      // Start Session
+      const sessionRef = await addDoc(collection(db, "sessions"), {
+        userId: authUser.uid,
+        userName: userNameInput.trim(),
+        startTime: serverTimestamp()
+      });
+      sessionIdRef.current = sessionRef.id;
+      sessionStartTimeRef.current = Date.now();
+    } catch (error: any) {
       console.error("Login failed:", error);
+      if (error.code === "permission-denied") {
+        setLoginError("Permission denied. Check your Firestore rules.");
+      } else {
+        setLoginError("Login failed: " + (error.message || "Unknown error"));
+      }
     } finally {
       setIsLoggingIn(false);
     }
@@ -962,6 +972,13 @@ export default function App() {
                   className="w-full h-14 px-6 bg-slate-50 border-2 border-slate-100 rounded-2xl text-lg font-bold focus:outline-none focus:border-blue-500 transition-all placeholder:text-slate-300"
                 />
               </div>
+
+              {loginError && (
+                <div className="p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-xs font-semibold leading-relaxed">
+                  {loginError}
+                </div>
+              )}
+
               <button 
                 disabled={isLoggingIn || !userNameInput.trim()}
                 className="w-full h-14 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 text-white font-black rounded-2xl shadow-xl shadow-blue-200 transition-all active:scale-95 flex items-center justify-center gap-3"
