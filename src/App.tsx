@@ -812,14 +812,27 @@ export default function App() {
                     <div className="max-h-64 overflow-y-auto space-y-3 px-1 custom-scrollbar">
                       {selectedLevels.map(level => (
                         <div key={level} className="space-y-1.5 border-t border-slate-100 pt-3 first:border-0 first:pt-0">
-                          <label className={`text-[10px] font-black uppercase tracking-wider ${
-                            level === 'Beginner' ? 'text-emerald-500' :
-                            level === 'Intermediate' ? 'text-blue-500' :
-                            level === 'Senior' ? 'text-indigo-500' :
-                            'text-violet-500'
-                          }`}>
-                            {level} Words
-                          </label>
+                          <div className="flex items-center justify-between">
+                            <label className={`text-[10px] font-black uppercase tracking-wider ${
+                              level === 'Beginner' ? 'text-emerald-500' :
+                              level === 'Intermediate' ? 'text-blue-500' :
+                              level === 'Senior' ? 'text-indigo-500' :
+                              'text-violet-500'
+                            }`}>
+                              {level} Words
+                            </label>
+                            <button
+                              onClick={() => setWordLists(prev => ({ 
+                                ...prev, 
+                                [level]: WORDS_BY_LEVEL[level].join(", ") 
+                              }))}
+                              className="text-[9px] font-bold text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded-md hover:bg-slate-50"
+                              title={`Restore default ${level} words`}
+                            >
+                              <RotateCcw className="w-2.5 h-2.5" />
+                              Restore
+                            </button>
+                          </div>
                           <textarea
                             value={wordLists[level]}
                             onChange={(e) => setWordLists(prev => ({ ...prev, [level]: e.target.value }))}
