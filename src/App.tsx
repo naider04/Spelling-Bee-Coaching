@@ -71,7 +71,7 @@ const VARIANTS: Record<string, string[]> = {
 
 const FORCE_LETTER_MODE = ["wisdom", "observe", "ambiguous"];
 
-const LEVELS = ["Beginner", "Intermediate", "Senior", "Master", "Custom"];
+const LEVELS = ["Beginner", "Intermediate", "Senior", "Master"];
 
 const WORDS_ALLOWED_AUTOCORRECT = new Set([
   "sophisticated", "anxious", "assertive", "misunderstood", "observe", 
@@ -109,7 +109,12 @@ const PHONETIC_MAP: Record<string, string> = {
 
 export default function App() {
   const [selectedLevels, setSelectedLevels] = useState<string[]>(["Beginner", "Intermediate", "Senior", "Master"]);
-  const [customWordsText, setCustomWordsText] = useState("Apple, Banana, Orange");
+  const [wordLists, setWordLists] = useState<Record<string, string>>({
+    Beginner: WORDS_BY_LEVEL.Beginner.join(", "),
+    Intermediate: WORDS_BY_LEVEL.Intermediate.join(", "),
+    Senior: WORDS_BY_LEVEL.Senior.join(", "),
+    Master: WORDS_BY_LEVEL.Master.join(", ")
+  });
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isPhoneMode, setIsPhoneMode] = useState(false);
   const [attemptHistory, setAttemptHistory] = useState<{ text: string, status: "✅" | "❌" }[]>([]);
@@ -117,23 +122,18 @@ export default function App() {
   const currentWords = useMemo(() => {
     let allWords: string[] = [];
     
-    if (selectedLevels.includes("Custom")) {
-      const custom = customWordsText
+    selectedLevels.forEach(level => {
+      const text = wordLists[level] || "";
+      const parsed = text
         .split(/[,\n\s]+/)
         .map(w => w.trim())
-        .filter(w => w.length > 0 && w.length < 50); // Sanity check on word length
-      allWords = [...allWords, ...custom];
-    }
-    
-    const levelWords = selectedLevels
-      .filter(l => l !== "Custom")
-      .flatMap(level => WORDS_BY_LEVEL[level] || []);
-      
-    allWords = [...allWords, ...levelWords];
+        .filter(w => w.length > 0 && w.length < 50);
+      allWords = [...allWords, ...parsed];
+    });
 
     const shuffled = allWords.length > 0 ? [...allWords].sort(() => Math.random() - 0.5) : ["No Words Selected"];
     return shuffled;
-  }, [selectedLevels, customWordsText]);
+  }, [selectedLevels, wordLists]);
   
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
   const [spelledText, setSpelledText] = useState("");
@@ -722,19 +722,19 @@ export default function App() {
 
   const currentLevelColor = useMemo(() => {
     // Find which level this word belongs to
-    const level = Object.entries(WORDS_BY_LEVEL).find(([_, words]) => 
-      words.includes(currentWord)
-    )?.[0] || (selectedLevels.includes("Custom") && customWordsText.includes(currentWord) ? "Custom" : "Beginner");
+    const level = Object.entries(wordLists).find(([_, text]) => {
+      const words = (text as string).toLowerCase().split(/[,\n\s]+/).map(w => w.trim());
+      return words.includes(currentWord.toLowerCase());
+    })?.[0] || "Beginner";
 
     switch(level) {
       case "Beginner": return "emerald";
       case "Intermediate": return "blue";
       case "Senior": return "indigo";
       case "Master": return "violet";
-      case "Custom": return "amber";
       default: return "emerald";
     }
-  }, [currentWord, customWordsText, selectedLevels]);
+  }, [currentWord, wordLists]);
 
   const isBlocked = isListening && (isSpeaking || status === "correct" || isTransitioningRef.current);
 
@@ -781,7 +781,7 @@ export default function App() {
                     exit={{ opacity: 0, scale: 0.95, y: 10 }}
                     className="absolute right-0 mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2 space-y-2"
                   >
-                    <div className="grid grid-cols-2 gap-1">
+                    <div className="grid grid-cols-2 gap-1 mb-2">
                       {LEVELS.map(level => (
                         <button
                           key={level}
@@ -792,8 +792,7 @@ export default function App() {
                               ? (level === "Beginner" ? 'bg-emerald-50 text-emerald-700' : 
                                  level === "Intermediate" ? 'bg-blue-50 text-blue-700' :
                                  level === "Senior" ? 'bg-indigo-50 text-indigo-700' :
-                                 level === "Master" ? 'bg-violet-50 text-violet-700' :
-                                 'bg-amber-50 text-amber-700')
+                                 'bg-violet-50 text-violet-700')
                               : 'text-slate-400 hover:bg-slate-50'}
                           `}
                         >
@@ -803,33 +802,39 @@ export default function App() {
                               level === "Beginner" ? 'text-emerald-500' : 
                               level === "Intermediate" ? 'text-blue-500' :
                               level === "Senior" ? 'text-indigo-500' :
-                              level === "Master" ? 'text-violet-500' :
-                              'text-amber-500'
+                              'text-violet-500'
                             }`} />
                           )}
                         </button>
                       ))}
                     </div>
 
-                    {selectedLevels.includes("Custom") && (
-                      <div className="border-t border-slate-100 pt-3 px-2 pb-1 space-y-2">
-                        <div className="flex flex-col gap-1">
-                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Edit Custom Words</label>
-                          <p className="text-[9px] text-slate-400 leading-tight">
-                            Write your words below. Separate each word using a <span className="text-amber-600 font-bold">comma</span>, <span className="text-amber-600 font-bold">space</span>, or <span className="text-amber-600 font-bold">new line</span>.
-                          </p>
+                    <div className="max-h-64 overflow-y-auto space-y-3 px-1 custom-scrollbar">
+                      {selectedLevels.map(level => (
+                        <div key={level} className="space-y-1.5 border-t border-slate-100 pt-3 first:border-0 first:pt-0">
+                          <label className={`text-[10px] font-black uppercase tracking-wider ${
+                            level === 'Beginner' ? 'text-emerald-500' :
+                            level === 'Intermediate' ? 'text-blue-500' :
+                            level === 'Senior' ? 'text-indigo-500' :
+                            'text-violet-500'
+                          }`}>
+                            {level} Words
+                          </label>
+                          <textarea
+                            value={wordLists[level]}
+                            onChange={(e) => setWordLists(prev => ({ ...prev, [level]: e.target.value }))}
+                            placeholder={`Enter ${level} words...`}
+                            className="w-full h-24 px-2 py-1.5 text-[11px] font-medium bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500/10 focus:border-slate-400 transition-all resize-none"
+                          />
                         </div>
-                        <textarea
-                          value={customWordsText}
-                          onChange={(e) => setCustomWordsText(e.target.value)}
-                          placeholder="Enter words here..."
-                          className="w-full h-32 px-3 py-2 text-xs font-medium bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all resize-none"
-                        />
-                        <div className="text-[9px] text-slate-400 italic">
-                          Example: Apple, Banana, Orange
-                        </div>
-                      </div>
-                    )}
+                      ))}
+                    </div>
+                    
+                    <div className="border-t border-slate-100 pt-2 px-2 pb-1">
+                      <p className="text-[9px] text-slate-400 leading-tight">
+                        Separate each word using a <span className="font-bold">comma</span>, <span className="font-bold">space</span>, or <span className="font-bold">new line</span>.
+                      </p>
+                    </div>
                   </motion.div>
                 </>
               )}
