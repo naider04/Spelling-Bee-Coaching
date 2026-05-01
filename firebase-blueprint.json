@@ -1,0 +1,70 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "App user tracking",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "totalTimeSeconds": { "type": "number" },
+        "lastActive": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name"]
+    },
+    "Mistake": {
+      "title": "Mistake",
+      "description": "Spelling mistake record",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "targetWord": { "type": "string" },
+        "targetChar": { "type": "string" },
+        "inputChar": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    },
+    "MicError": {
+      "title": "MicError",
+      "description": "Microphone or browser speech error",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "errorType": { "type": "string" },
+        "browser": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Session": {
+      "title": "Session",
+      "description": "User session duration",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "endTime": { "type": "string", "format": "date-time" },
+        "durationSeconds": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "mistakes": {
+      "schema": "Mistake",
+      "description": "Historical mistakes for students"
+    },
+    "mic_errors": {
+      "schema": "MicError",
+      "description": "Speech recognition failures"
+    },
+    "sessions": {
+      "schema": "Session",
+      "description": "Usage time tracking"
+    }
+  }
+}

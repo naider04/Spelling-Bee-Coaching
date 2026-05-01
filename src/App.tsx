@@ -6,6 +6,8 @@
 import { motion, AnimatePresence } from "motion/react";
 import { Mic, MicOff, RotateCcw, Volume2, CheckCircle2, XCircle, ChevronRight, Zap, Eye, EyeOff } from "lucide-react";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { db, auth, initAuth, OperationType, handleFirestoreError } from "./lib/firebase";
+import { setDoc, doc, addDoc, collection, serverTimestamp, updateDoc, increment } from "firebase/firestore";
 
 // Register speech recognition for TypeScript
 declare global {
@@ -53,7 +55,8 @@ const PHONETIC_GROUPS: Record<string, string[]> = {
   'd': ['d', 't', 'v', 'b'],
   't': ['t', 'd'],
   'c': ['z', 'c'],
-  'z': ['z', 'c']
+  'z': ['z', 'c'],
+  'a': ['a', 'ei', 'asd']
 };
 
 const LETTER_NAMES: Record<string, string> = {
@@ -76,7 +79,7 @@ const LEVELS = ["Beginner", "Intermediate", "Senior", "Master"];
 const WORDS_ALLOWED_AUTOCORRECT = new Set([
   "sophisticated", "anxious", "assertive", "misunderstood", "observe", 
   "wash", "embarrassing", "unnecessary", "serious", "obsolete", 
-  "psychologist", "small", "impeccable", "answer", "foster"
+  "psychologist", "small", "impeccable", "answer", "foster", "astonishing", "unbelievable", "accurate"
 ]);
 
 const PHONETIC_MAP: Record<string, string> = {
@@ -84,6 +87,7 @@ const PHONETIC_MAP: Record<string, string> = {
   "i'm": "im",
   "ima": "im",
   "okay": "ok",
+  "ok": "ok",
   "bee": "b",
   "see": "c",
   "sea": "c",
@@ -104,10 +108,17 @@ const PHONETIC_MAP: Record<string, string> = {
   "ex": "x",
   "why": "y",
   "zee": "z",
-  "double you": "w"
+  "double you": "w",
+  "double-u": "w"
 };
 
 export default function App() {
+  const [user, setUser] = useState<{ id: string, name: string } | null>(null);
+  const [userNameInput, setUserNameInput] = useState("");
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const sessionIdRef = useRef<string | null>(null);
+  const sessionStartTimeRef = useRef<number | null>(null);
+
   const [selectedLevels, setSelectedLevels] = useState<string[]>(["Beginner", "Intermediate", "Senior", "Master"]);
   const [wordLists, setWordLists] = useState<Record<string, string>>({
     Beginner: WORDS_BY_LEVEL.Beginner.join(", "),
@@ -170,6 +181,7 @@ export default function App() {
   const isListeningRef = useRef(false);
   const [status, setStatus] = useState<"idle" | "correct" | "error" | "validating">("idle");
   const [isMuted, setIsMuted] = useState(false);
+  const [showCopiedToast, setShowCopiedToast] = useState(false);
   
   const recognitionRef = useRef<any>(null);
 
@@ -195,7 +207,10 @@ export default function App() {
 
   const isWholeWordSpeech = (transcript: string) => {
     const words = transcript.trim().split(/\s+/);
-    if (words.length === 1) return true;
+    if (words.length === 1) {
+      // If it's just one word and it's longer than 2 characters, it's definitely a word pronunciation
+      return words[0].length > 2;
+    }
     const longWords = words.filter(w => w.length > 1);
     return longWords.length > words.length / 2;
   };
@@ -263,14 +278,15 @@ export default function App() {
       if (extracted.length === lowerTgt.length && 
           compareLetterSequences(extracted.split(''), lowerTgt.split(''))) return true;
 
-      if (cleanTranscriptFull.replace(/[^a-z]/g, '') === lowerTgt) return true;
+      // Restore specific substitution patterns
       if (lowerTgt.startsWith('im') && handleImPattern(cleanTranscriptFull, lowerTgt)) return true;
       if (lowerTgt.startsWith('un') && handleUnPattern(cleanTranscriptFull, lowerTgt)) return true;
       if (handleThePattern(cleanTranscriptFull, lowerTgt)) return true;
       if (handleLetterByLetterSpelling(cleanTranscriptFull, lowerTgt)) return true;
 
+      // Handle letter-by-letter names (bee, see, etc.)
       const decodedLetters = decodeLetterNames(cleanTranscriptFull);
-      if (decodedLetters.replace(/[^a-z]/g, '') === lowerTgt) return true;
+      if (decodedLetters.length === lowerTgt.length && decodedLetters.replace(/[^a-z]/g, '') === lowerTgt) return true;
 
       const spokenLettersNoSpaces = cleanTranscriptFull.replace(/\s+/g, '').toLowerCase();
       if (spokenLettersNoSpaces.length === lowerTgt.length && 
@@ -281,7 +297,23 @@ export default function App() {
 
   const addAttempt = useCallback((text: string, isCorrect: boolean) => {
     setAttemptHistory(prev => [{ text, status: isCorrect ? "✅" : "❌" }, ...prev].slice(0, 50));
-  }, []);
+    
+    // Log mistake to Firebase if incorrect and user is logged in
+    if (!isCorrect && user) {
+      const spelledTextClean = (spelledText + interimText).replace(/\s/g, "");
+      const targetChar = targetWord[spelledTextClean.length] || "";
+      const inputChar = text[0] || ""; // Taking first char of utterance as mistake input
+
+      addDoc(collection(db, "mistakes"), {
+        userId: user.id,
+        userName: user.name,
+        targetWord: targetWord,
+        targetChar: targetChar,
+        inputChar: inputChar,
+        timestamp: serverTimestamp()
+      }).catch(e => handleFirestoreError(e, OperationType.CREATE, "mistakes"));
+    }
+  }, [user, spelledText, interimText, targetWord]);
 
   // Voice synthesis
   const speak = useCallback((text: string) => {
@@ -362,73 +394,131 @@ export default function App() {
     isListeningRef.current = isListening;
   }, [isListening]);
 
+  // Unified character matching logic
+  const matchChar = useCallback(
+    (idx: number, inputChar: string) => {
+      const targetChar = targetWord[idx]?.toLowerCase();
+      if (!targetChar || !inputChar) return false;
+
+      const lowerInput = inputChar.toLowerCase();
+
+      // 2. Direct match
+      if (lowerInput === targetChar) return true;
+
+      // 3. Phonetic groups (b/p/v, t/d, etc)
+      const phoneticGroup = PHONETIC_GROUPS[targetChar] || [targetChar];
+      if (phoneticGroup.includes(lowerInput)) return true;
+
+      // 4. User-defined equivalents
+      const equivalents: Record<string, string[]> = {
+        v: ["d", "b"],
+        d: ["v", "z", "t", "b"],
+        z: ["d"],
+        b: ["p", "v", "d"],
+        p: ["b"],
+        t: ["d"],
+        a: ["asd", "a"],
+        o: ["ok", "okay", "o"],
+        k: ["ok", "okay", "k"]
+      };
+
+      return equivalents[targetChar]?.includes(lowerInput) || false;
+    },
+    [targetWord]
+  );
+
   // Phonetic cleaning with anti-pronunciation check
-  const cleanSpelling = useCallback((text: string) => {
+  const processSegment = useCallback((text: string, currentSpelling: string) => {
     // 1. Pre-process for patterns like "I am" or "SM"
     const lowerText = text.toLowerCase().trim();
+    if (!lowerText) return "";
     
     // Quick match for targetWord (autocorrected whole word) - ONLY for whitelisted words
     const lowerTextNoSpaces = lowerText.replace(/\s+/g, "");
-    if (WORDS_ALLOWED_AUTOCORRECT.has(targetWord) && (lowerText === targetWord || lowerTextNoSpaces === targetWord)) return targetWord;
+
+    // Check for specific misrecognition phrases first
+    const isStarterMatch =
+      (targetWord === "astonishing" &&
+        (lowerText.startsWith("asd") || lowerTextNoSpaces.startsWith("asd"))) ||
+      (targetWord === "unbelievable" &&
+        (lowerText.includes("you and") || lowerTextNoSpaces.includes("youand"))) ||
+      (targetWord === "accurate" &&
+        (lowerText.startsWith("acc") || lowerTextNoSpaces.startsWith("acc")));
+
+    const isAutocorrectMatch =
+      WORDS_ALLOWED_AUTOCORRECT.has(targetWord) &&
+      (lowerText === targetWord ||
+        lowerTextNoSpaces === targetWord ||
+        (isStarterMatch && lowerText.length > 5)); // Guard against too short starter matches
+
+    if (isAutocorrectMatch) {
+      if (
+        targetWord.length > 6 &&
+        currentSpelling.length < 2 && // Require at least some spelling effort for long words
+        !isStarterMatch
+      ) {
+        return ""; 
+      }
+      return targetWord;
+    }
 
     // Special case for "I am" pattern observed in logs
     if (lowerText.startsWith("i am ") && targetWord.toLowerCase().startsWith("im")) {
       const rest = lowerText.substring(5).replace(/\s/g, "");
       const targetRest = targetWord.toLowerCase().substring(2);
-      if (rest === targetRest || rest[0] === targetRest[0]) {
+      if (rest === targetRest || (targetRest[0] && rest[0] === targetRest[0])) {
          return "im" + rest;
       }
     }
 
-    // Split by whitespace to get distinct utterances
-    let rawSegments = lowerText.replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "").split(/\s+/);
+    // Split by whitespace to get distinct utterances, filter out empty segments
+    let rawSegments = lowerText.replace(/[.,/#!$%^&*;:{}=\-_`~()]/g, "").split(/\s+/).filter(s => s.length > 0);
     
-    let cleaned = rawSegments.map(segment => {
-      // 1. Check direct phonetic map (e.g., "double you", "em", "en", "d" -> "t")
-      if (PHONETIC_MAP[segment]) return PHONETIC_MAP[segment];
+    let currentIdx = currentSpelling.length;
+    let result = "";
+    
+    for (const rawSegment of rawSegments) {
+      let segment = rawSegment;
       
-      // 2. If it's a single letter, it's valid spelling
-      if (segment.length === 1) return segment;
+      // Check direct phonetic transcript map (bee -> b, etc)
+      if (PHONETIC_MAP[segment]) segment = PHONETIC_MAP[segment];
       
-      // 3. Special case for "i am" or "i'm" which might not split correctly depending on browser
-      if (segment === "im" || segment === "i'm") return "im";
+      // 1. Try to match as a multi-character block if segment is short (2-4 chars)
+      if (segment.length > 1 && segment.length <= 4 && segment.length < targetWord.length) {
+        const targetSlice = targetWord.substring(currentIdx, currentIdx + segment.length).toLowerCase();
+        if (targetSlice.length === segment.length) {
+          let subMatch = true;
+          for (let i = 0; i < segment.length; i++) {
+            if (!matchChar(currentIdx + i, segment[i])) {
+              subMatch = false;
+              break;
+            }
+          }
 
-      // 4. Handle "SM" misrecognition for "small"
-      if (segment === "sm" && targetWord.toLowerCase() === "small") return "sm";
-
-      // 5. Fallback: if the segment matches the target word exactly (autocorrect) - ONLY for whitelisted words
-      if (WORDS_ALLOWED_AUTOCORRECT.has(targetWord) && segment === targetWord.toLowerCase()) return segment;
-
-      // 6. Fallback: if the segment is short (2-3 chars) and not the target word, 
-      // maybe it's a misheard letter. Let's try to take just the first char.
-      if (segment.length <= 3) {
-        return segment[0];
+          if (subMatch) {
+            result += targetSlice;
+            currentIdx += segment.length;
+            continue;
+          }
+        }
       }
 
-      // 7. Reject anything longer than 3 chars as it's likely a whole word pronunciation
-      return "";
-    }).join("");
+      // 2. Fallback to single/normalized char matching
+      if (matchChar(currentIdx, segment)) {
+        // SUCCESS: Use the CORRECT target character for the UI
+        result += targetWord[currentIdx]?.toLowerCase() || "";
+        currentIdx++;
+      } else if (segment.length === 1) {
+        result += segment;
+        currentIdx++;
+      } else if (segment.length <= 3 && segment[0]) {
+        result += segment[0] || "";
+        currentIdx++;
+      }
+    }
 
-    return cleaned;
-  }, [targetWord]);
-
-  // Fuzzy Match Check
-  const isCharCorrect = useCallback((idx: number, inputChar: string) => {
-    const targetChar = targetWord[idx];
-    if (!inputChar) return false;
-    if (inputChar === targetChar) return true;
-    
-    const equivalents: Record<string, string[]> = {
-      'v': ['d', 'b'],
-      'd': ['v', 'z', 't'],
-      'z': ['d'],
-      'b': ['p', 'v'],
-      'p': ['b'],
-      't': ['d']
-    };
-
-    return equivalents[targetChar]?.includes(inputChar) || false;
-  }, [targetWord]);
+    return result || "";
+  }, [targetWord, matchChar]);
 
   const initRecognition = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -465,7 +555,7 @@ export default function App() {
         if (currentFinal) {
           const spokenRaw = currentFinal.trim();
           const transcriptNormalized = spokenRaw.toLowerCase();
-          setDebugLog(prev => [spokenRaw, ...prev].slice(0, 10));
+          setDebugLog(prev => [spokenRaw, ...prev].slice(0, 16));
 
           // Extract letters and check
           const words = spokenRaw.split(/\s+/);
@@ -514,34 +604,54 @@ export default function App() {
           const normalizedNoSpaces = transcriptFull.replace(/\s+/g, "");
           
           const QUICK_ACCEPTS: Record<string, string[]> = {
-            "obsolete": ["obsolette"],
-            "psychologist": ["psychology", "psychologists", "psicology", "psychologies"],
-            "small": ["sm"],
-            "anxious": ["anxios"],
-            "sophisticated": ["sofisticated"],
-            "assertive": ["asertive"],
-            "misunderstood": ["misunderstood"],
-            "embarrassing": ["embarassing"],
-            "unnecessary": ["unneccessary"],
-            "serious": ["serious"],
-            "answer": ["ans wer"]
+            "obsolete": ["obsolete"],
+            "observe": ["observe"],
+            "unbelievable": ["unbelievable", "you and"],
+            "sophisticated": ["sophisticated"],
+            "small": ["small"],
+            "anxious": ["anxios", "anxious"],
+            "astonishing": ["asd"],
+            "accurate": ["acc"]
           };
 
-          const isDirectMatch = WORDS_ALLOWED_AUTOCORRECT.has(targetWord.toLowerCase()) && 
-                               (transcriptFull === targetWord.toLowerCase() || normalizedNoSpaces === targetWord.toLowerCase());
-          const isQuickAccept = QUICK_ACCEPTS[targetWord.toLowerCase()]?.includes(transcriptFull) || 
-                                QUICK_ACCEPTS[targetWord.toLowerCase()]?.includes(normalizedNoSpaces);
+          const isDirectMatch =
+            WORDS_ALLOWED_AUTOCORRECT.has(targetWord.toLowerCase()) &&
+            (transcriptFull === targetWord.toLowerCase() ||
+              normalizedNoSpaces === targetWord.toLowerCase());
+
+          const isQuickAccept = (QUICK_ACCEPTS[targetWord.toLowerCase()] || []).some(
+            (q) => {
+              const qNoSpaces = q.replace(/\s+/g, "");
+              // Strict matching for quick accepts to avoid over-triggering
+              return transcriptFull === q || normalizedNoSpaces === qNoSpaces;
+            }
+          );
 
           if (isDirectMatch || isQuickAccept) {
-            recognitionRef.current?.stop();
-            handleCorrect(targetWord);
-            return;
+            const isKnownExceptionMatch = 
+              (targetWord.toLowerCase() === "astonishing" && (transcriptFull.startsWith("asd") || normalizedNoSpaces.startsWith("asd"))) ||
+              (targetWord.toLowerCase() === "unbelievable" && (transcriptFull.includes("you and") || normalizedNoSpaces.includes("youand"))) ||
+              (targetWord.toLowerCase() === "accurate" && (transcriptFull.startsWith("acc ") || normalizedNoSpaces === "acc"));
+
+            const isHeuristicLongWord = targetWord.length > 6;
+            // Significant effort requirement: strictly enforced for all autocorrect matches
+            // Require at least 2 chars spelled for most words, or 1 for longer ones with partial match
+            const hasSpellingEffort = spelledText.length >= 2 || (targetWord.length >= 5 && spelledText.length >= 1);
+
+            // Special block for "small" vs "SM"
+            const isOnlySM = targetWord.toLowerCase() === "small" && (transcriptFull === "sm" || normalizedNoSpaces === "sm") && spelledText.length < 2;
+
+            if (!isOnlySM && (hasSpellingEffort || isKnownExceptionMatch)) {
+              recognitionRef.current?.stop();
+              handleCorrect(targetWord);
+              return;
+            }
           }
         }
 
         if (currentFinal) {
           setSpelledText(prev => {
-            const cleanedSegment = cleanSpelling(currentFinal);
+            const cleanedSegment = processSegment(currentFinal, prev);
             
             // If the cleaned segment IS the target word, just set it to the target word
             if (cleanedSegment.toLowerCase() === targetWord.toLowerCase()) {
@@ -552,10 +662,13 @@ export default function App() {
           });
         }
       
-      setInterimText(cleanSpelling(currentInterim));
+      setInterimText(processSegment(currentInterim || "", spelledText) || "");
     };
 
     recognition.onerror = (event: any) => {
+      // Ignore 'aborted' error as it's often triggered by intentional restarts/transitions
+      if (event.error === "aborted") return;
+
       // Handle the 'no-speech' error which is common when the user is quiet
       if (event.error === "no-speech") {
         setDebugLog(prev => ["(Mic active, waiting for speech...)", ...prev].slice(0, 10));
@@ -565,6 +678,17 @@ export default function App() {
       console.error("Speech recognition error", event.error);
       setDebugLog(prev => [`Error: ${event.error}`, ...prev].slice(0, 10));
       
+      // Log Mic Error to Firebase
+      if (user) {
+        addDoc(collection(db, "mic_errors"), {
+          userId: user.id,
+          userName: user.name,
+          errorType: event.error,
+          browser: navigator.userAgent,
+          timestamp: serverTimestamp()
+        }).catch(e => handleFirestoreError(e, OperationType.CREATE, "mic_errors"));
+      }
+
       if (event.error === "not-allowed" || event.error === "service-not-allowed") {
         setIsListening(false);
         setStatus("error");
@@ -593,13 +717,13 @@ export default function App() {
     };
 
     recognitionRef.current = recognition;
-  }, [cleanSpelling]); // Removed isListening from dependencies to avoid unnecessary re-initializations
+  }, [processSegment]); // Updated from cleanSpelling
 
   const resetWordProgress = useCallback(() => {
     setSpelledText("");
     setInterimText("");
     setStatus("idle");
-    setDebugLog([]);
+    // setDebugLog([]); // KEEP LOG PERSISTENT
   }, []);
 
   const nextWord = useCallback(() => {
@@ -666,56 +790,35 @@ export default function App() {
 
     const currentFullSpelling = (spelledText + interimText).replace(/\s/g, "");
     
-    // Check if the total spelled sequence effectively matches correctly (fuzzy allowed)
+    // Check if the total spelled sequence effectively matches correctly
     let allCorrect = true;
-    for (let i = 0; i < targetWord.length; i++) {
-        if (i < currentFullSpelling.length) {
-            if (!isCharCorrect(i, currentFullSpelling[i])) {
-                allCorrect = false;
-                break;
-            }
-        } else {
-            allCorrect = false;
-            break;
-        }
-    }
-
-    if (allCorrect && currentFullSpelling.length === targetWord.length && status !== "correct") {
-      setStatus("correct");
-      
-      // Stop recognition immediately to clear buffers and prevent bleed
-      if (isListeningRef.current) {
-        isTransitioningRef.current = true;
-        try {
-          recognitionRef.current?.stop();
-        } catch (e) {
-          console.warn("Stop on correct failed:", e);
+    if (currentFullSpelling.length !== targetWord.length) {
+      allCorrect = false;
+    } else {
+      for (let i = 0; i < targetWord.length; i++) {
+        if (!matchChar(i, currentFullSpelling[i])) {
+          allCorrect = false;
+          break;
         }
       }
-      
-      // Use ref to keep timer stable across effect re-runs
-      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
-      transitionTimerRef.current = setTimeout(() => {
-        nextWord();
-        transitionTimerRef.current = null;
-        // isTransitioningRef.current = false; will be handled by nextWord calling reset or manual reset?
-        // Wait, handleCorrect does this better.
-        isTransitioningRef.current = false;
-      }, 1000);
+    }
+
+    if (allCorrect && status !== "correct") {
+      handleCorrect(targetWord);
     } else if (currentFullSpelling.length > 0 && status !== "correct" && !isTransitioningRef.current) {
       // Incremental error checking
       let hasError = false;
       for (let i = 0; i < currentFullSpelling.length; i++) {
-          if (!isCharCorrect(i, currentFullSpelling[i])) {
+          if (!matchChar(i, currentFullSpelling[i])) {
               hasError = true;
               break;
           }
       }
       setStatus(hasError ? "error" : "idle");
-    } else {
+    } else if (currentFullSpelling.length === 0 && status !== "correct") {
       setStatus("idle");
     }
-  }, [spelledText, interimText, targetWord, isCharCorrect, currentWords, nextWord]);
+  }, [spelledText, interimText, targetWord, matchChar, currentWords, handleCorrect, status]);
 
   useEffect(() => {
     initRecognition();
@@ -731,6 +834,86 @@ export default function App() {
       return [...prev, level];
     });
   };
+
+  // Login handler
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userNameInput.trim()) return;
+    
+    setIsLoggingIn(true);
+    try {
+      const authUser = await initAuth();
+      if (authUser) {
+        const userRef = doc(db, "users", authUser.uid);
+        await setDoc(userRef, {
+          name: userNameInput.trim(),
+          totalTimeSeconds: 0,
+          lastActive: serverTimestamp()
+        });
+        
+        setUser({ id: authUser.uid, name: userNameInput.trim() });
+        
+        // Start Session
+        const sessionRef = await addDoc(collection(db, "sessions"), {
+          userId: authUser.uid,
+          userName: userNameInput.trim(),
+          startTime: serverTimestamp()
+        });
+        sessionIdRef.current = sessionRef.id;
+        sessionStartTimeRef.current = Date.now();
+      }
+    } catch (error) {
+      console.error("Login failed:", error);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  // Session cleanup and time tracking
+  useEffect(() => {
+    const handleUnload = () => {
+      if (user && sessionIdRef.current && sessionStartTimeRef.current) {
+        const duration = Math.floor((Date.now() - sessionStartTimeRef.current) / 1000);
+        const sessionRef = doc(db, "sessions", sessionIdRef.current);
+        const userRef = doc(db, "users", user.id);
+        
+        // These are fire-and-forget on unload, though navigator.sendBeacon is better for real apps
+        updateDoc(sessionRef, {
+          endTime: serverTimestamp(),
+          durationSeconds: duration
+        });
+        updateDoc(userRef, {
+          totalTimeSeconds: increment(duration),
+          lastActive: serverTimestamp()
+        });
+      }
+    };
+
+    window.addEventListener("beforeunload", handleUnload);
+    return () => {
+      handleUnload();
+      window.removeEventListener("beforeunload", handleUnload);
+    };
+  }, [user]);
+
+  // Periodic heartbeat to update time
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(() => {
+      if (user && sessionStartTimeRef.current) {
+         const now = Date.now();
+         const incrementalDuration = Math.floor((now - sessionStartTimeRef.current) / 1000);
+         // Update user total time periodically
+         const userRef = doc(db, "users", user.id);
+         updateDoc(userRef, {
+           totalTimeSeconds: increment(incrementalDuration),
+           lastActive: serverTimestamp()
+         });
+         sessionStartTimeRef.current = now; // Reset offset for next interval
+      }
+    }, 60000); // Every minute
+    return () => clearInterval(interval);
+  }, [user]);
 
   const currentLevelColor = useMemo(() => {
     // Find which level this word belongs to
@@ -752,6 +935,45 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col selection:bg-blue-600 selection:text-white">
+      {/* Login Overlay */}
+      {!user && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-md px-6">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-white p-8 md:p-12 rounded-[2.5rem] shadow-2xl w-full max-w-md border border-white"
+          >
+            <div className="text-center space-y-4 mb-8">
+              <div className="w-16 h-16 bg-amber-400 rounded-2xl mx-auto flex items-center justify-center text-3xl shadow-lg border border-amber-300">🐝</div>
+              <h2 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight">Welcome, Student!</h2>
+              <p className="text-sm text-slate-500 font-medium">Please enter your name to start your practice session and track your progress.</p>
+            </div>
+            
+            <form onSubmit={handleLogin} className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">Your Full Name</label>
+                <input 
+                  autoFocus
+                  required
+                  type="text" 
+                  value={userNameInput}
+                  onChange={(e) => setUserNameInput(e.target.value)}
+                  placeholder="e.g. John Doe"
+                  className="w-full h-14 px-6 bg-slate-50 border-2 border-slate-100 rounded-2xl text-lg font-bold focus:outline-none focus:border-blue-500 transition-all placeholder:text-slate-300"
+                />
+              </div>
+              <button 
+                disabled={isLoggingIn || !userNameInput.trim()}
+                className="w-full h-14 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 text-white font-black rounded-2xl shadow-xl shadow-blue-200 transition-all active:scale-95 flex items-center justify-center gap-3"
+              >
+                {isLoggingIn ? "Starting..." : "Start Practice"}
+                {!isLoggingIn && <ChevronRight className="w-5 h-5" />}
+              </button>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
       {/* Navigation Bar - Spelling Bee UNEMI 2026 */}
       <nav className="h-16 px-4 md:px-10 flex items-center justify-between border-b border-slate-200 bg-white shadow-sm shrink-0 sticky top-0 z-50">
         <div className="flex items-center gap-2 md:gap-3">
@@ -983,10 +1205,15 @@ export default function App() {
 
           {/* Letter Grid - Only show if not hide mode, or show dots */}
           {!isPhoneMode && (
-            <div className="flex flex-wrap gap-2 md:gap-4 justify-center items-center mt-4">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex flex-wrap gap-2 md:gap-4 justify-center items-center mt-4"
+            >
               {targetWord.split('').map((char, idx) => {
-                const spelledChar = (spelledText + interimText)[idx];
-                const isCorrect = isCharCorrect(idx, spelledChar);
+                const combined = (spelledText || "") + (interimText || "");
+                const spelledChar = combined[idx];
+                const isCorrect = matchChar(idx, spelledChar);
                 const isPending = !spelledChar;
                 const isWrong = spelledChar && !isCorrect;
 
@@ -994,7 +1221,7 @@ export default function App() {
                   <motion.span
                     key={idx}
                     className={`
-                      text-[1rem] md:text-5xl font-mono font-bold leading-none
+                      text-2xl md:text-5xl font-mono font-bold leading-none
                       ${isPending ? 'text-slate-200' : ''}
                       ${isCorrect ? 'text-emerald-500' : ''}
                       ${isWrong ? 'text-red-500' : ''}
@@ -1004,7 +1231,7 @@ export default function App() {
                   </motion.span>
                 );
               })}
-            </div>
+            </motion.div>
           )}
 
                 {/* Correct Feedback Text (Simple) */}
@@ -1093,11 +1320,26 @@ export default function App() {
                 Mic Input Log (Last 16)
                 <button 
                   onClick={() => {
-                    navigator.clipboard.writeText(debugLog.join('\n'));
+                    const logText = debugLog.join('\n');
+                    navigator.clipboard.writeText(logText);
+                    setShowCopiedToast(true);
+                    setTimeout(() => setShowCopiedToast(false), 2000);
                   }}
-                  className="bg-slate-200 hover:bg-slate-300 text-[8px] px-1.5 py-0.5 rounded transition-colors text-slate-600"
+                  className="bg-slate-200 hover:bg-slate-300 text-[8px] px-1.5 py-0.5 rounded transition-colors text-slate-600 relative"
                 >
-                  Copy
+                  {showCopiedToast ? "Copied!" : "Copy Log"}
+                  <AnimatePresence>
+                    {showCopiedToast && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.9 }}
+                        className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1 bg-slate-800 text-white text-[10px] font-bold rounded-lg shadow-lg whitespace-nowrap pointer-events-none"
+                      >
+                        Copied to clipboard! 📋
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </button>
               </span>
               {isListening && !isBlocked && <span className="text-blue-500 animate-pulse">● Live</span>}

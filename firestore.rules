@@ -1,0 +1,64 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Common helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // User Profile
+    match /users/{userId} {
+      allow get: if isSignedIn();
+      allow list: if false; // Prevention of user enumeration
+      allow create: if isSignedIn() && request.auth.uid == userId 
+                    && request.resource.data.keys().hasAll(['name', 'totalTimeSeconds', 'lastActive'])
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() > 0
+                    && request.resource.data.name.size() <= 100
+                    && request.resource.data.totalTimeSeconds is number
+                    && request.resource.data.lastActive == request.time;
+      allow update: if isSignedIn() && request.auth.uid == userId
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['totalTimeSeconds', 'lastActive'])
+                    && request.resource.data.totalTimeSeconds is number
+                    && request.resource.data.lastActive == request.time;
+    }
+
+    // Mistakes tracking
+    match /mistakes/{mistakeId} {
+      allow create: if isSignedIn()
+                    && request.resource.data.keys().hasAll(['userId', 'userName', 'targetWord', 'targetChar', 'inputChar', 'timestamp'])
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.timestamp == request.time;
+      // Allow user to read THEIR OWN mistakes? (optional but good)
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Sessions tracking
+    match /sessions/{sessionId} {
+      allow create: if isSignedIn() 
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.startTime is timestamp;
+      allow update: if isSignedIn() 
+                    && resource.data.userId == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['endTime', 'durationSeconds'])
+                    && request.resource.data.endTime == request.time;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Mic Errors tracking
+    match /mic_errors/{errorId} {
+      allow create: if isSignedIn()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.timestamp == request.time;
+    }
+  }
+}
