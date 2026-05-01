@@ -76,7 +76,7 @@ const LEVELS = ["Beginner", "Intermediate", "Senior", "Master"];
 const WORDS_ALLOWED_AUTOCORRECT = new Set([
   "sophisticated", "anxious", "assertive", "misunderstood", "observe", 
   "wash", "embarrassing", "unnecessary", "serious", "obsolete", 
-  "psychologist", "small", "impeccable", "answer"
+  "psychologist", "small", "impeccable", "answer", "foster"
 ]);
 
 const PHONETIC_MAP: Record<string, string> = {
@@ -298,6 +298,15 @@ export default function App() {
     utterance.onstart = () => {
       setIsSpeaking(true);
       
+      // Stop recognition if it's running to avoid noise/echo
+      if (isListeningRef.current) {
+        try {
+          recognitionRef.current?.stop();
+        } catch (e) {
+          // Ignore
+        }
+      }
+      
       // Attempt to "predict" the end if offset is positive
       if (micSyncOffset > 0) {
         if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
@@ -320,15 +329,18 @@ export default function App() {
 
       setIsSpeaking(false);
       
-      // If we were transitioning, restart the mic now that the word has been announced
-      if (isTransitioningRef.current) {
+      // Always restart mic after TTS ends if isListening is true
+      if (isListeningRef.current) {
+        // If we were transitioning, we definitely want to restart now.
+        // If not transitioning, standard auto-restart is handled by onend, 
+        // but since we explicitly stopped it onstart, we need to restart it here.
         isTransitioningRef.current = false;
-        if (isListeningRef.current) {
-          try {
+        try {
+          if (recognitionRef.current && recognitionRef.current.readyState !== 'listening') {
             recognitionRef.current?.start();
-          } catch (e) {
-            console.warn("Post-transition mic start failed:", e);
           }
+        } catch (e) {
+          console.warn("Post-TTS mic start failed:", e);
         }
       }
     };
@@ -566,10 +578,10 @@ export default function App() {
     };
 
     recognition.onend = () => {
-      // Auto-restart pattern from mobile.html
-      if (isListeningRef.current && !isTransitioningRef.current) {
+      // Auto-restart pattern from mobile.html - only restart if NOT speaking
+      if (isListeningRef.current && !isTransitioningRef.current && !isSpeakingRef.current) {
         setTimeout(() => {
-          if (isListeningRef.current) {
+          if (isListeningRef.current && !isSpeakingRef.current) {
             try {
               recognitionRef.current?.start();
             } catch (e) {
