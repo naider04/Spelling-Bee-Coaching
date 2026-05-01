@@ -17,11 +17,11 @@ declare global {
 
 const WORDS_BY_LEVEL: Record<string, string[]> = {
   Beginner: [
-    "Activity", "Always", "Answer", "Between", "Book", "Bored", "Bottle", "Boy", "Break", 
-    "Children", "Close", "Computer", "Country", "Face", "Father", "Feel", "Finger", "Flower", 
-    "Friend", "Gate", "Help", "Look", "Make", "Monday", "Movie", "Nature", "Near", "Night", 
-    "Notebook", "Often", "Pencil", "People", "Play", "Please", "Potato", "Rich", "School", 
-    "Shoes", "Small", "Speak", "Spoon", "Sport", "Strong", "Teacher", "Think", "Tree", "Wash", "Water"
+    "Book", "Help", "Finger", "Teacher", "Potato", "Play", "Shoes", "Sport", "Night", "Think", 
+    "Often", "Water", "Notebook", "Country", "Children", "Look", "Spoon", "Near", "Movie", "Make", 
+    "Feel", "Face", "Between", "Nature", "Father", "Boy", "Flower", "Monday", "Sneakers", "Always", 
+    "Tree", "Bottle", "Speak", "Small", "Bored", "Person", "Gate", "Please", "Computer", "Close", 
+    "Strong", "Pencil", "Friend", "People", "Answer", "Rich", "Wash", "School", "Break", "Activity"
   ],
   Intermediate: [
     "Accurate", "Adventure", "Balance", "Calendar", "Career", "Challenge", "Complete", "Control", 
@@ -32,51 +32,19 @@ const WORDS_BY_LEVEL: Record<string, string[]> = {
     "Special", "Student", "Suggest", "Talent", "Travel", "Useful", "Vacation", "Welcome", "Yesterday"
   ],
   Senior: [
-    "Ambiguous", "Anxious", "Apprehensive", "Articulate", "Assertive", "Assimilate", "Astonishing", 
-    "Autonomous", "Benevolent", "Brevity", "Camouflage", "Capricious", "Coherence", "Colloquial", 
-    "Conscientious", "Controversial", "Convoluted", "Dilemma", "Discrepancy", "Divulge", "Eloquent", 
-    "Empirical", "Encounter", "Enigmatic", "Ephemeral", "Fairness", "Filmmaker", "Foster", 
-    "Hypothetical", "Impeccable", "Importune", "Indispensable", "Ineffable", "Judgemental", 
-    "Meticulous", "Neighborhood", "Obsolete", "Paradox", "Perseverance", "Plausible", "Pragmatic", 
-    "Predicament", "Redundant", "Reiterate", "Resilient", "Sophisticated", "Spontaneous", "Subtle", 
-    "Taxonomy", "Unnecessary", "Wisdom"
+    "Astonishing", "Ambiguous", "Anxious", "Apprehensive", "Articulate", "Assertive", "Assimilate", "Autonomous", "Benevolent", "Brevity", 
+    "Capricious", "Camouflage", "Coherence", "Colloquial", "Conscientious", "Controversial", "Convoluted", "Divulge", "Dilemma", "Discrepancy", 
+    "Eloquent", "Empirical", "Encounter", "Enigmatic", "Ephemeral", "Foster", "Fairness", "Filmmaker", "Hypothetical", "Impeccable", 
+    "Importune", "Indispensable", "Ineffable", "Judgemental", "Meticulous", "Neighborhood", "Obsolete", "Paradox", "Perseverance", "Plausible", 
+    "Pragmatic", "Predicament", "Redundant", "Reiterate", "Resilient", "Sophisticated", "Spontaneous", "Subtle", "Unnecessary", "Taxonomy", 
+    "Wisdom", "Chiaroscurist"
   ],
   Master: [
-    "Acknowledgment", "Acquaintance", "Architecture", "Biochemistry", "Camouflage", "Compliance", 
-    "Conscientious", "Controversial", "Dehydration", "Disappearance", "Embarrassing", "Environmentally", 
-    "Exaggeration", "Flabbergasted", "Handkerchief", "Hypothetical", "Independence", "Irreplaceable", 
-    "Knowledgeable", "Misunderstood", "Overwhelming", "Psychologist", "Quarantine", "Recommendable", "Unbelievable"
+    "Acknowledgment", "Acquaintance", "Architecture", "Biochemistry", "Compliance", "Camouflage", "Conscientious", "Controversial", 
+    "Dehydration", "Disappearance", "Embarrassing", "Environmentally", "Exaggeration", "Flabbergasted", "Handkerchief", "Hypothetical", 
+    "Independence", "Irreplaceable", "Knowledgeable", "Misunderstood", "Overwhelming", "Psychologist", "Quarantine", "Recommendable", "Unbelievable"
   ]
 };
-
-const HTML_WORDS = [
-  "Accurate", "Acknowledgment", "Acquaintance", "Activity", "Adventure", "Always",
-  "Ambiguous", "Answer", "Anxious", "Apprehensive", "Architecture", "Articulate",
-  "Assertive", "Assimilate", "Astonishing", "Autonomous", "Balance", "Benevolent",
-  "Between", "Biochemistry", "Book", "Bored", "Bottle", "Boy", "Break", "Brevity",
-  "Calendar", "Camouflage", "Capricious", "Career", "Challenge",
-  "Children", "Close", "Coherence", "Colloquial", "Complete", "Compliance",
-  "Computer", "Conscientious", "Control", "Controversial",
-  "Convoluted", "Country", "Curious", "Decide", "Dehydration",
-  "Dilemma", "Disappearance", "Discover", "Discrepancy", "Divulge", "Eloquent",
-  "Embarrassing", "Empirical", "Encounter", "Energy", "Enigmatic", "Environmentally",
-  "Ephemeral", "Exaggeration", "Face", "Fairness", "Famous", "Father", "Feel",
-  "Filmmaker", "Finger", "Flabbergasted", "Flower", "Focus", "Foster", "Friend",
-  "Gate", "Gather", "Handkerchief", "Help", "Honest", "Hypothetical",
-  "Imagine", "Impeccable", "Importune", "Improve", "Independence", "Indispensable",
-  "Ineffable", "Irreplaceable", "Journey", "Judgemental", "Knowledge", "Knowledgeable",
-  "Language", "Look", "Make", "Member", "Message", "Meticulous", "Misunderstood",
-  "Monday", "Movie", "Nature", "Near", "Neighborhood", "Night", "Notebook", "Notice",
-  "Observe", "Obsolete", "Often", "Outside", "Overwhelming", "Package", "Paradox",
-  "Patient", "Pencil", "People", "Perfect", "Perseverance", "Plausible", "Play",
-  "Please", "Popular", "Potato", "Practice", "Pragmatic", "Predicament", "Prepare",
-  "Present", "Protect", "Provide", "Psychologist", "Quarantine", "Quickly", "Reason",
-  "Recommendable", "Redundant", "Reiterate", "Resilient", "Respect", "Result", "Rich",
-  "School", "Secret", "Serious", "Shoes", "Small", "Sophisticated", "Speak", "Special",
-  "Spontaneous", "Spoon", "Sport", "Strong", "Student", "Subtle", "Suggest", "Talent",
-  "Taxonomy", "Teacher", "Think", "Travel", "Tree", "Unbelievable", "Unnecessary",
-  "Useful", "Vacation", "Wash", "Water", "Welcome", "Wisdom", "Yesterday"
-];
 
 const PHONETIC_GROUPS: Record<string, string[]> = {
   'b': ['b', 'p', 'v', 'd'],
@@ -147,10 +115,6 @@ export default function App() {
   const [attemptHistory, setAttemptHistory] = useState<{ text: string, status: "✅" | "❌" }[]>([]);
 
   const currentWords = useMemo(() => {
-    if (isPhoneMode) {
-      return [...HTML_WORDS].sort(() => Math.random() - 0.5);
-    }
-    
     let allWords: string[] = [];
     
     if (selectedLevels.includes("Custom")) {
@@ -169,7 +133,7 @@ export default function App() {
 
     const shuffled = allWords.length > 0 ? [...allWords].sort(() => Math.random() - 0.5) : ["No Words Selected"];
     return shuffled;
-  }, [selectedLevels, isPhoneMode, customWordsText]);
+  }, [selectedLevels, customWordsText]);
   
   const [currentWordIndex, setCurrentWordIndex] = useState(0);
   const [spelledText, setSpelledText] = useState("");
